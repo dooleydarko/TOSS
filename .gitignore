@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build and dependencies
+bin/
+.build/
+.swiftpm/
+Packages/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+node_modules/
+__pycache__/
+*.pyc
+
+# Environment & credentials
+.env
+.env.local
+*.key
+*.pem
+secrets/
+
+# Storage & received files
+received/
+temp/
+logs/

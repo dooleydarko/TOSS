@@ -1,0 +1,10 @@
+{
+  "name": "toss-ai-proxy",
+  "version": "1.0.0",
+  "description": "Secure server-side AI proxy for TOSS handoff formatting",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {}
+}

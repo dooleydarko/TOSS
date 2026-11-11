@@ -1,0 +1,8 @@
+TOSS — AI Handoff | Google Antigravity starter package
+
+1. Open TOSS_MASTER_HANDOFF.md.
+2. Give it to Google Antigravity with this instruction:
+   "Read the entire TOSS master handoff. Implement Phase 1 only, beginning with the smallest functional end-to-end path. Keep the project modular for later GPT/Claude refinement. Document every tested feature, blocker, repo commit and next step. Never claim a build or a device test passed without evidence."
+3. Connect your GitHub repository within Antigravity.
+4. Configure Gemini credentials securely; never paste production keys into handoff documents or commit them.
+5. When Antigravity completes Phase 1, share docs/HANDOFF_TO_NEXT_AI.md and the repository with GPT, followed by Claude.

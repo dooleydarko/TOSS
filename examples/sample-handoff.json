@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "handoffId": "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d",
+  "projectId": "f0e1d2c3-b4a5-9687-1234-56789abcdef0",
+  "title": "TOSS MVP Prototype",
+  "createdAt": "2026-11-11T17:45:00Z",
+  "updatedAt": "2026-11-11T17:45:00Z",
+  "revision": 1,
+  "destination": "antigravity",
+  "objective": "Transfer AI-ready project instructions from iPhone to Mac.",
+  "context": "Build an iPhone-first app called TOSS. Users can record an idea, have AI make a clean handoff, then swipe it over to their Mac so Antigravity can pick up the project. Keep all old versions and don't lose project history.",
+  "requirements": [
+    "Record or type project instructions on iPhone.",
+    "Generate editable Markdown and JSON handoffs conforming to schema 1.0.0.",
+    "Pair with Mac receiver and securely transfer on user action.",
+    "Save searchable version history locally."
+  ],
+  "constraints": [
+    "iPhone-first, macOS receiver first.",
+    "Working core transfer is more important than animation polish.",
+    "No plain text production API keys in client code."
+  ],
+  "completed": [
+    "Project repository initialized with modular multi-agent structure.",
+    "Handoff schema v1.0.0 defined and sample documents authored."
+  ],
+  "nextActions": [
+    "Build SwiftUI capture and review prototype.",
+    "Implement macOS receiver with Bonjour advertisement and encrypted endpoint.",
+    "Verify end-to-end send/receive loop with SHA-256 checksum validation."
+  ],
+  "knownIssues": [],
+  "repository": {
+    "url": null,
+    "branch": "main",
+    "commit": null
+  },
+  "attachments": [],
+  "source": {
+    "type": "text",
+    "transcriptAvailable": false,
+    "rawInput": "I want an iPhone app called TOSS. I can record an idea, have AI make a clean handoff, then swipe it over to my Mac so Antigravity can pick up the project. Keep all the old versions and don't lose the project history."
+  }
+}
