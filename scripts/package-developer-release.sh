@@ -21,7 +21,10 @@ mkdir -p "$MAC" "$SIM" "$DEV"
 ditto "$BUILD/Build/Products/Release/TOSS-Desktop.app" "$MAC/TOSS-Desktop.app"
 cp "$BUILD/Build/Products/Release/TOSS-Receiver" "$MAC/toss-receiver"
 cp scripts/start-receiver.command "$MAC/Start TOSS Receiver.command"
-chmod +x "$MAC/toss-receiver" "$MAC/Start TOSS Receiver.command"
+cp scripts/diagnose-receiver.command "$MAC/Diagnose TOSS.command"
+chmod +x "$MAC/toss-receiver" "$MAC/Start TOSS Receiver.command" "$MAC/Diagnose TOSS.command"
+bash -n "$MAC/Start TOSS Receiver.command"
+bash -n "$MAC/Diagnose TOSS.command"
 for binary in "$MAC/toss-receiver" "$MAC/TOSS-Desktop.app/Contents/MacOS/TOSS-Desktop"; do
   lipo "$binary" -verify_arch x86_64 arm64
 done
@@ -30,10 +33,13 @@ codesign --force --sign - "$MAC/toss-receiver"
 codesign --force --sign - "$MAC/TOSS-Desktop.app"
 codesign --verify --strict "$MAC/toss-receiver"
 codesign --verify --deep --strict "$MAC/TOSS-Desktop.app"
-# Verify loopback service and reject the known default secret in LAN mode.
-if TOSS_PAIRING_SECRET=toss-dev-secret-change-in-production "$MAC/toss-receiver" --host 0.0.0.0 --port 17443 --storage "$WORK/rejected"; then
-  echo "Unsafe LAN default was accepted"; exit 1
-fi
+# Validate native launch before testing explicit rejection, not merely any nonzero exit.
+"$MAC/toss-receiver" --version | grep -F "secure protocol v2"
+set +e
+TOSS_PAIRING_SECRET=toss-dev-secret-change-in-production "$MAC/toss-receiver" --host 0.0.0.0 --port 17443 --storage "$WORK/rejected"
+REJECT_STATUS=$?
+set -e
+[[ "$REJECT_STATUS" -eq 2 ]] || { echo "Expected explicit LAN rejection (2), got $REJECT_STATUS"; exit 1; }
 "$MAC/toss-receiver" --host 127.0.0.1 --port 17443 --storage "$WORK/smoke" >"$WORK/receiver.log" 2>&1 &
 PID=$!
 trap 'kill "$PID" 2>/dev/null || true; rm -rf "$WORK"' EXIT

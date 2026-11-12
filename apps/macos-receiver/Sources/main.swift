@@ -7,6 +7,10 @@ import TossProtocol
 #endif
 
 let args = CommandLine.arguments
+if args.count == 2 && args[1] == "--version" {
+    print("TOSS Receiver — secure protocol v2")
+    exit(0)
+}
 
 var port: UInt16 = 7443
 var host = "127.0.0.1"
