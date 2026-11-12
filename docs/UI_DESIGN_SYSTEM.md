@@ -1,4 +1,4 @@
-# TOSS — shared UI foundation (v0.3)
+# TOSS — shared UI foundation (v0.4)
 Status: proposed design baseline; not yet applied to application screens.
 
 Primary reference approved by the owner: [Ronas IT — Self-care Mobile App Design Concept](https://dribbble.com/shots/23278774-Self-care-Mobile-App-Design-Concept).
@@ -38,13 +38,13 @@ Use system semantic colors for success, warning, error and dark mode; validate c
 - Motion: restrained feedback; the spring-based Toss gesture remains the signature interaction.
 
 ## TOSS screen mapping
-- Capture/home: adapt the reference's greeting/header area into an entry point for previous handoffs, with access to search, open and edit existing handoffs. Adapt its “How you feel today” tracking area into the recording area with live microphone waveform and editable transcript. Preserve contextual project input and structure CTA.
+- Capture/home: adapt the reference's greeting/header area into an entry point for previous handoffs, with access to search, open and edit existing handoffs. Adapt its “How you feel today” tracking area into the recording area with a single Apple-inspired circular recording control and editable live transcript (no waveform). Preserve contextual project input and structure CTA.
 - Signature ball: adapt the reference's ball into a tangible handoff object. After recording, structuring and review, the user tosses the ball upward to send the completed handoff to the paired desktop. Preserve the accessible send button and transfer acknowledgment; the ball is not a substitute for delivery confirmation.
 - Review: clear overview, existing Markdown/JSON views, primary send CTA.
 - Toss: destination and transfer status, prominent swipeable ball, explicit accessible send button.
 - History: searchable previous handoffs, revision metadata, and an edit/continue flow that preserves prior revisions; entry accessible from the home header.
 - Queue: state chips, retry action and informative empty state.
-- Settings: grouped controls with existing privacy disclosures.
+- Settings: grouped controls, connected AI providers, model picker and existing privacy disclosures.
 
 ## Build and review gates
 1. Introduce centralized tokens/components in isolation, then migrate Capture as reference screen with the header/history entry, recording tracker and ball. Wire editing and ball delivery to real store behavior, not placeholder data.
@@ -56,9 +56,17 @@ Use system semantic colors for success, warning, error and dark mode; validate c
 For other web projects, port the semantic tokens and component states, not the iOS code. Add a component gallery showing normal, pressed, focused, disabled, loading, empty and error variants. Each project may set its own accent and imagery while sharing the rules above.
 
 ## Recording-to-handoff interaction (owner clarification)
-- The home tracking area is the actual voice capture workspace: microphone button, live waveform, and visible, continuously updating speech-to-text directly underneath. The waveform is not a replacement for the words.
+- The home tracking area is the actual voice capture workspace: a single solid circular microphone/stop control and visible, continuously updating speech-to-text directly underneath. No waveform, audio bars, or oscillating trace. Idle shows a mic icon; recording shows a stop icon and elapsed time, with a restrained state ring; processing shows a progress ring. Respect reduced motion; provide accessible labels and state announcements.
 - Preserve the raw editable transcript separately from the structured output; allow stop, correction and additional dictation before structuring.
 - A clearly labeled Create Handoff action sends the transcript to the configured AI structuring provider. The existing offline formatter is a fallback and must not be misrepresented as a live AI model. Show processing, errors and retry states, keeping the raw words intact.
 - The review area presents the AI-generated title, goals, requirements, constraints and next actions, with existing Markdown and JSON modes. Let the user inspect and edit before sending; continuing an existing handoff should retain revision history.
 - Only a successfully prepared handoff is represented by the tossable ball. Swiping or tapping Send transfers the reviewed artifact, not the raw audio. Maintain transfer receipt and offline queue behavior.
-- No new chat service or AI provider is required for the initial UI implementation; existing Apple Speech capture and configurable Gemini structuring are separate stages. Do not claim always-on conversational AI is implemented.
+- Apple Speech capture and AI structuring are separate stages. Do not claim always-on conversational AI is implemented.
+
+## Model integration (owner requirement)
+- Support a provider/model selector for handoff structuring, available in Settings and as a compact selection near Create Handoff. The model that writes a handoff is independent of the destination tool receiving it.
+- Preserve the existing Gemini provider and extend the provider interface to support OpenAI, Anthropic and OpenAI-compatible endpoints (including compatible local or hosted models). Add other providers through adapters rather than hard-coding models into the UI.
+- Allow free-tier and paid API models where the provider offers them. Do not imply free unlimited use, that a chat subscription includes API credits, or that a provider is connected before verification. Model availability and pricing vary by account and provider.
+- Provide user-entered credentials stored in Keychain, connection testing, selectable models, cost/tier disclosure where verified, and clear authentication/rate-limit/error states. Never log or embed secrets. Do not send transcripts to a different cloud provider without user consent. Keep raw text when any provider fails.
+- Keep the existing offline rule-based formatter available without a key; identify it as offline formatting, not a language model. Local model support is conditional on a reachable, compatible endpoint and device/server capacity.
+- Model integration is a separate functional workstream; UI-only changes must preserve existing working Gemini and offline behavior. Validate adapters and failure paths before release.
