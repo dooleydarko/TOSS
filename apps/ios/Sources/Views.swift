@@ -1,4 +1,6 @@
 import SwiftUI
+import AVFoundation
+import Combine
 #if canImport(TossSchema)
 import TossSchema
 #endif
@@ -7,13 +9,18 @@ import TossProtocol
 #endif
 
 // MARK: - Capture View
+@MainActor
 public struct CaptureView: View {
     @EnvironmentObject var store: TossStore
     @State private var inputText: String = ""
     @State private var contextText: String = ""
     @State private var isProcessing: Bool = false
     @State private var navigateToReview: Bool = false
-    @State private var isRecording: Bool = false
+    @StateObject private var voice = VoiceCapture()
+    @State private var dictationBase = ""
+    @State private var hasVoiceInput = false
+    @State private var processingError: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     public init() {}
 
@@ -30,22 +37,42 @@ public struct CaptureView: View {
                         }
                         TextEditor(text: $inputText)
                             .frame(minHeight: 120)
+                            .disabled(voice.isBusy || isProcessing)
                     }
 
                     HStack {
                         Button(action: toggleRecording) {
                             HStack {
-                                Image(systemName: isRecording ? "stop.circle.fill" : "mic.circle.fill")
-                                    .foregroundColor(isRecording ? .red : .blue)
-                                Text(isRecording ? "Stop Recording" : "Voice Dictate")
+                                Image(systemName: voice.state == .recording ? "stop.circle.fill" : "mic.circle.fill")
+                                    .foregroundColor(voice.state == .recording ? .red : .blue)
+                                Text(voice.state == .recording ? "Stop Recording" : "Voice Dictate")
                             }
                         }
+                        .buttonStyle(.borderless)
+                        .disabled(isProcessing || voice.state == .authorizing || voice.state == .finishing)
                         Spacer()
                         if !inputText.isEmpty {
-                            Button("Clear") { inputText = "" }
+                            Button("Clear") { inputText = ""; hasVoiceInput = false }
+                                .buttonStyle(.borderless)
                                 .foregroundColor(.secondary)
+                                .disabled(voice.isBusy || isProcessing)
                         }
                     }
+                    if voice.state == .recording {
+                        MicrophoneWaveform(levels: voice.levels)
+                        Label("Recording • speak now", systemImage: "waveform")
+                            .font(.caption).foregroundColor(.red)
+                    } else if voice.state == .authorizing || voice.state == .finishing {
+                        HStack {
+                            ProgressView()
+                            Text(voice.state == .authorizing ? "Requesting access…" : "Finishing transcript…")
+                        }.font(.caption)
+                    }
+                    if let message = voice.errorMessage {
+                        Text(message).font(.caption).foregroundColor(.secondary)
+                    }
+                    Text("Dictation uses on-device speech recognition when available; otherwise Apple may process audio on its servers.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
 
                 Section(header: Text("Optional Context / Project")) {
@@ -68,7 +95,10 @@ public struct CaptureView: View {
                             Spacer()
                         }
                     }
-                    .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing)
+                    .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing || voice.isBusy)
+                    if let error = processingError {
+                        Text(error).font(.caption).foregroundColor(.red)
+                    }
                 }
 
                 NavigationLink(
@@ -79,25 +109,43 @@ public struct CaptureView: View {
             }
             .navigationTitle("TOSS Capture")
         }
+        .onChange(of: voice.transcript) { text in
+            guard !text.isEmpty else { return }
+            inputText = dictationBase.isEmpty ? text : dictationBase + "\n" + text
+            hasVoiceInput = true
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .background { voice.cancel() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { notification in
+            if let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+               AVAudioSession.InterruptionType(rawValue: value) == .began {
+                voice.interrupted()
+            }
+        }
+        .onDisappear { voice.cancel() }
     }
 
     private func toggleRecording() {
-        isRecording.toggle()
-        if isRecording {
-            // Simulated voice input for MVP demo
-            inputText = "I want an iPhone app called TOSS. Users can record an idea, have AI structure a clean handoff, then swipe it over to their Mac so Antigravity can build it."
+        if voice.state == .recording {
+            voice.stop()
+        } else if voice.state == .idle {
+            dictationBase = inputText
+            Task { await voice.start() }
         }
     }
 
     private func processAndStructure() {
         isProcessing = true
+        processingError = nil
         Task {
             do {
-                _ = try await store.createHandoffFromText(rawText: inputText, context: contextText)
+                _ = try await store.createHandoffFromText(rawText: inputText, context: contextText, sourceType: hasVoiceInput ? .voice : .text)
                 isProcessing = false
                 navigateToReview = true
             } catch {
                 isProcessing = false
+                processingError = error.localizedDescription
             }
         }
     }
@@ -296,7 +344,7 @@ public struct TossView: View {
                     .frame(width: 300, height: 230)
                     .background(Color.white)
                     .cornerRadius(20)
-                    .shadow(color: Color.black.opacity(min(0.25, 0.08 + abs(dragOffset.height) / 600)), radius: 14, x: 0, y: 8)
+                    .shadow(color: Color.black.opacity(min(0.25, 0.08 + Double(abs(dragOffset.height)) / 600.0)), radius: 14, x: 0, y: 8)
                     .offset(x: dragOffset.width * 0.4, y: dragOffset.height)
                     .rotationEffect(.degrees(Double(dragOffset.width) / 14.0))
                     .scaleEffect(max(0.86, 1.0 - abs(dragOffset.height) / 900.0))
@@ -512,13 +560,13 @@ public struct SettingsView: View {
                     SecureField("Gemini API Key (Optional)", text: $store.geminiApiKey)
                     TextField("Model", text: $store.selectedModel)
 
-                    Text("Without an API key, TOSS operates 100% offline using the built-in local rule-based structurer.")
+                    Text("Without an API key, handoff structuring uses the built-in offline rule-based formatter.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 Section(header: Text("Privacy & Security")) {
-                    Text("No voice recordings or project instructions are uploaded to cloud servers unless an AI key is explicitly configured and user initiates structuring.")
+                    Text("Dictation prefers on-device speech recognition; Apple may process audio when local recognition is unavailable. TOSS does not save audio files. Project notes are sent to Gemini only when you configure an AI key and initiate structuring.")
                         .font(.caption)
                 }
             }
@@ -528,6 +576,7 @@ public struct SettingsView: View {
 }
 
 // MARK: - Main Tab Container
+@MainActor
 public struct TossAppView: View {
     @StateObject var store = TossStore()
 

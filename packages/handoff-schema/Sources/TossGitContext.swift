@@ -5,6 +5,7 @@ import TossSchema
 
 public struct TossGitContext {
     public static func currentRepositoryContext(at path: String = FileManager.default.currentDirectoryPath) -> TossRepository {
+        #if os(macOS) || os(Linux)
         let branch = runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], workingDirectory: path)
         let commit = runGitCommand(["rev-parse", "HEAD"], workingDirectory: path)
         let remoteUrl = runGitCommand(["config", "--get", "remote.origin.url"], workingDirectory: path)
@@ -14,8 +15,13 @@ public struct TossGitContext {
             branch: branch.isEmpty ? nil : branch,
             commit: commit.isEmpty ? nil : commit
         )
+        #else
+        // iOS cannot spawn git; the desktop receiver supplies repository context.
+        return TossRepository()
+        #endif
     }
 
+    #if os(macOS) || os(Linux)
     private static func runGitCommand(_ arguments: [String], workingDirectory: String) -> String {
         let process = Process()
         let pipe = Pipe()
@@ -35,4 +41,5 @@ public struct TossGitContext {
             return ""
         }
     }
+    #endif
 }

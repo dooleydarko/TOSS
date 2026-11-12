@@ -24,6 +24,8 @@ targets:
       INFOPLIST_KEY_NSLocalNetworkUsageDescription: "TOSS uses the local network to discover and transfer handoffs to paired Macs."
       INFOPLIST_KEY_NSBonjourServices:
         - "_toss._tcp"
+      GENERATE_INFOPLIST_FILE: YES
+      INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "TOSS converts your spoken notes into editable text for handoffs."
       INFOPLIST_KEY_NSMicrophoneUsageDescription: "TOSS uses your microphone to transcribe ideas and instructions into structured handoffs."
 
   TOSS-Receiver:

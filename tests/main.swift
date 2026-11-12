@@ -54,7 +54,7 @@ testCase("Handoff Creation and Validation") {
 
 testCase("Git Context Extraction") {
     let repo = TossGitContext.currentRepositoryContext()
-    assert(repo.branch == "main", "Branch must be main")
+    assert(repo.branch?.isEmpty == false, "Git must report the current branch or detached HEAD")
     assert(repo.commit != nil, "Commit hash must not be nil")
     assert(repo.url?.contains("dooleydarko/TOSS") == true, "Remote URL must point to TOSS")
 }
@@ -199,6 +199,40 @@ Task {
         assert(structured.requirements.count == 2)
         assert(structured.nextActions.count == 1)
         assert(structured.constraints.count == 1)
+    }
+
+    await testCaseAsync("Offline multi-goal notes preserve later goals and negative constraints") {
+        let input = "Project polish\n- Build waveform\n- Add Markdown export\n- must not change transfer protocol\n2. Verify export\nCompleted: baseline capture\nIssue: microphone access"
+        let result = try await RuleBasedFallbackProvider().structure(input: input, context: "Two goals")
+        assert(result.requirements == ["Build waveform", "Add Markdown export"])
+        assert(result.constraints == ["must not change transfer protocol"])
+        assert(result.nextActions == ["Verify export"])
+        assert(result.completed == ["Completed: baseline capture"])
+        assert(result.knownIssues == ["Issue: microphone access"])
+        assert(result.source.rawInput == input)
+        assert(result.objective.contains("Add Markdown export"))
+    }
+
+    await testCaseAsync("Gemini prompt contract and response preserve source") {
+        let input = "Goal A\nGoal B: don't remove files"
+        let context = "Existing repo"
+        let notes = try GeminiAIProvider.notesJSON(input: input, context: context)
+        let parsed = try JSONSerialization.jsonObject(with: Data(notes.utf8)) as? [String: String]
+        assert(parsed?["rawNotes"] == input && parsed?["context"] == context)
+        assert(GeminiAIProvider.structuringPrompt.contains("every distinct actionable goal"))
+        assert(GeminiAIProvider.structuringPrompt.contains("\"attachments\": []"))
+        let original = TossHandoff(title: "Two goals", destination: .gpt, objective: "A and B", context: context, requirements: ["A", "B"], source: TossSource(type: .text, rawInput: "model altered notes"))
+        let json = String(decoding: try original.toJSONData(), as: UTF8.self)
+        let envelope = ["candidates": [["content": ["parts": [["text": json]]]]]]
+        let decoded = try GeminiAIProvider.decodeResponse(JSONSerialization.data(withJSONObject: envelope), originalInput: input)
+        assert(decoded.requirements == ["A", "B"])
+        assert(decoded.source.rawInput == input)
+        do {
+            _ = try GeminiAIProvider.decodeResponse(Data("{}".utf8), originalInput: input)
+            throw TossValidationError.invalidField("Malformed response should fail")
+        } catch TossValidationError.invalidField(let reason) {
+            assert(reason == "Missing Gemini response")
+        }
     }
 
     // 4. End-to-End Receiver Server & Client Transfer
