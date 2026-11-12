@@ -230,7 +230,6 @@ public final class TossTransferQueue: ObservableObject {
                 let receipt = try await send(attempt)
                 guard !receipt.isEmpty else { throw TossClientError.transferFailed("Missing receipt") }
                 attempt.status = .completed(receiptId: receipt)
-                credentials.remove(attempt.id)
                 attempt.pairingSecret = ""
             } catch {
                 attempt.lastAttemptAt = Date()
@@ -241,6 +240,11 @@ public final class TossTransferQueue: ObservableObject {
                 }
             }
             updateItem(attempt)
+            // Persist the receipt before removing the retry credential. A restart
+            // can clean up any leftover Keychain entry for a completed item.
+            if case .completed = attempt.status {
+                credentials.remove(attempt.id)
+            }
         }
     }
 
