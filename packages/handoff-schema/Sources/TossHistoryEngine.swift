@@ -30,10 +30,12 @@ public final class TossHistoryEngine {
     }
 
     public func recordHandoff(_ handoff: TossHandoff) {
-        handoffsById[handoff.handoffId] = handoff
+        if (handoffsById[handoff.handoffId]?.revision ?? 0) <= handoff.revision {
+            handoffsById[handoff.handoffId] = handoff
+        }
 
         var list = projectRevisions[handoff.projectId] ?? []
-        if let existingIdx = list.firstIndex(where: { $0.handoffId == handoff.handoffId }) {
+        if let existingIdx = list.firstIndex(where: { $0.handoffId == handoff.handoffId && $0.revision == handoff.revision }) {
             list[existingIdx] = handoff
         } else {
             list.append(handoff)
@@ -46,7 +48,7 @@ public final class TossHistoryEngine {
 
     public func createNextRevision(from existing: TossHandoff, newRequirements: [String] = [], completedActions: [String] = []) -> TossHandoff {
         var updated = existing
-        updated.revision += 1
+        updated.revision = max(existing.revision, handoffsById[existing.handoffId]?.revision ?? 0) + 1
         updated.updatedAt = ISO8601DateFormatter().string(from: Date())
         if !newRequirements.isEmpty {
             updated.requirements.append(contentsOf: newRequirements)
@@ -78,9 +80,9 @@ public final class TossHistoryEngine {
     }
 
     private func persistToDisk() {
-        let all = Array(handoffsById.values)
+        let all = projectRevisions.values.flatMap { $0 }
         if let data = try? JSONEncoder().encode(all) {
-            try? data.write(to: storageURL)
+            try? data.write(to: storageURL, options: .atomic)
         }
     }
 
@@ -88,10 +90,12 @@ public final class TossHistoryEngine {
         if let data = try? Data(contentsOf: storageURL),
            let all = try? JSONDecoder().decode([TossHandoff].self, from: data) {
             for item in all {
-                handoffsById[item.handoffId] = item
+                if (handoffsById[item.handoffId]?.revision ?? 0) <= item.revision {
+                    handoffsById[item.handoffId] = item
+                }
                 var list = projectRevisions[item.projectId] ?? []
                 list.append(item)
-                projectRevisions[item.projectId] = list
+                projectRevisions[item.projectId] = list.sorted { $0.revision < $1.revision }
             }
         }
     }

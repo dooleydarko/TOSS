@@ -18,7 +18,13 @@ public final class ReceiverServer {
     public let pairingSecret: String
     public let receiverName: String
 
-    private var validSessionTokens: Set<String> = []
+    private var validSessionTokens: [String: Date] = [:]
+    private let sessionLock = NSLock()
+    private let sessionLifetime: TimeInterval
+    private let connectionSlots = DispatchSemaphore(value: 16)
+    private let maxHeaderBytes = 16 * 1024
+    private let maxBodyBytes = 10 * 1024 * 1024
+    private let transferLock = NSLock()
     private var serverSocket: Int32 = -1
     private var isRunning: Bool = false
     private let queue = DispatchQueue(label: "com.toss.receiver.server", attributes: .concurrent)
@@ -28,13 +34,15 @@ public final class ReceiverServer {
         port: UInt16 = 7443,
         storageDirectory: URL,
         pairingSecret: String = "toss-dev-secret-change-in-production",
-        receiverName: String = Host.current().localizedName ?? "Mac Receiver"
+        receiverName: String = Host.current().localizedName ?? "Mac Receiver",
+        sessionLifetime: TimeInterval = 3600
     ) {
         self.host = host
         self.port = port
         self.storageDirectory = storageDirectory
         self.pairingSecret = pairingSecret
         self.receiverName = receiverName
+        self.sessionLifetime = max(0, sessionLifetime)
     }
 
     public func start(blocking: Bool = false) throws {
@@ -84,6 +92,9 @@ public final class ReceiverServer {
 
     public func stop() {
         isRunning = false
+        sessionLock.lock()
+        validSessionTokens.removeAll()
+        sessionLock.unlock()
         if serverSocket >= 0 {
             close(serverSocket)
             serverSocket = -1
@@ -106,8 +117,13 @@ public final class ReceiverServer {
                 continue
             }
 
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.handleClient(clientSocket: clientSocket)
+            guard connectionSlots.wait(timeout: .now()) == .success else {
+                close(clientSocket)
+                continue
+            }
+            DispatchQueue.global(qos: .userInitiated).async {
+                defer { self.connectionSlots.signal() }
+                self.handleClient(clientSocket: clientSocket)
             }
         }
     }
@@ -115,59 +131,125 @@ public final class ReceiverServer {
     private func handleClient(clientSocket: Int32) {
         defer { close(clientSocket) }
 
-        var buffer = [UInt8](repeating: 0, count: 65536)
-        var receivedData = Data()
-
-        // Read initial header chunk
-        let bytesRead = read(clientSocket, &buffer, buffer.count)
-        guard bytesRead > 0 else { return }
-        receivedData.append(buffer, count: bytesRead)
-
-        // Find header boundary \r\n\r\n
-        let boundary = "\r\n\r\n".data(using: .utf8)!
-        while !receivedData.contains(boundary) && isRunning {
-            let nextRead = read(clientSocket, &buffer, buffer.count)
-            guard nextRead > 0 else { break }
-            receivedData.append(buffer, count: nextRead)
-        }
-
-        guard let range = receivedData.range(of: boundary) else {
-            sendResponse(clientSocket: clientSocket, status: 400, body: "Bad Request: Malformed HTTP")
-            return
-        }
-
-        let headerData = receivedData.subdata(in: 0..<range.lowerBound)
-        guard let headerString = String(data: headerData, encoding: .utf8) else {
-            sendResponse(clientSocket: clientSocket, status: 400, body: "Bad Request: Invalid encoding")
-            return
-        }
-
-        let lines = headerString.components(separatedBy: "\r\n")
-        guard let requestLine = lines.first else { return }
-        let reqParts = requestLine.components(separatedBy: " ")
-        guard reqParts.count >= 2 else { return }
-        let method = reqParts[0].uppercased()
-        let path = reqParts[1]
-
-        var contentLength = 0
-        for line in lines.dropFirst() {
-            let lower = line.lowercased()
-            if lower.hasPrefix("content-length:") {
-                let parts = line.components(separatedBy: ":")
-                if parts.count >= 2 {
-                    contentLength = Int(parts[1].trimmingCharacters(in: .whitespaces)) ?? 0
-                }
+        #if canImport(Darwin)
+        var noSignal: Int32 = 1
+        setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        #endif
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        let deadline = ProcessInfo.processInfo.systemUptime + 20
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        var received = Data()
+        let boundary = Data("\r\n\r\n".utf8)
+        while received.range(of: boundary) == nil {
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                sendResponse(clientSocket: clientSocket, status: 408, body: "Request timeout")
+                return
+            }
+            let n = read(clientSocket, &buffer, buffer.count)
+            guard n > 0 else { return }
+            received.append(buffer, count: n)
+            if received.count > maxHeaderBytes && received.range(of: boundary) == nil {
+                sendResponse(clientSocket: clientSocket, status: 431, body: "Headers too large")
+                return
             }
         }
-
-        var bodyData = receivedData.subdata(in: range.upperBound..<receivedData.count)
-        while bodyData.count < contentLength {
-            let nextRead = read(clientSocket, &buffer, buffer.count)
-            guard nextRead > 0 else { break }
-            bodyData.append(buffer, count: nextRead)
+        guard let range = received.range(of: boundary), range.lowerBound <= maxHeaderBytes else {
+            sendResponse(clientSocket: clientSocket, status: 431, body: "Headers too large")
+            return
         }
+        guard let header = String(data: received.prefix(range.lowerBound), encoding: .utf8) else {
+            sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid header encoding")
+            return
+        }
+        let lines = header.components(separatedBy: "\r\n")
+        let parts = lines.first?.split(separator: " ") ?? []
+        guard parts.count == 3, parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0" else {
+            sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid HTTP request line")
+            return
+        }
+        let method = String(parts[0]).uppercased()
+        let path = String(parts[1])
+        var length: Int?
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else {
+                sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid header")
+                return
+            }
+            let key = line[..<colon].lowercased()
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if key == "transfer-encoding" {
+                sendResponse(clientSocket: clientSocket, status: 400, body: "Transfer-Encoding unsupported")
+                return
+            }
+            if key == "content-length" {
+                guard length == nil, !value.isEmpty, value.utf8.allSatisfy({ (48...57).contains($0) }),
+                      let parsed = Int(value) else {
+                    sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid Content-Length")
+                    return
+                }
+                guard parsed <= maxBodyBytes else {
+                    sendResponse(clientSocket: clientSocket, status: 413, body: "Payload too large")
+                    return
+                }
+                length = parsed
+            }
+        }
+        guard method != "POST" || length != nil else {
+            sendResponse(clientSocket: clientSocket, status: 411, body: "Content-Length required")
+            return
+        }
+        let contentLength = length ?? 0
+        var body = Data(received.suffix(from: range.upperBound))
+        guard body.count <= contentLength else {
+            sendResponse(clientSocket: clientSocket, status: 400, body: "Unexpected request bytes")
+            return
+        }
+        while body.count < contentLength {
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                sendResponse(clientSocket: clientSocket, status: 408, body: "Request timeout")
+                return
+            }
+            let remaining = min(buffer.count, contentLength - body.count)
+            let n = read(clientSocket, &buffer, remaining)
+            guard n > 0 else {
+                sendResponse(clientSocket: clientSocket, status: 400, body: "Incomplete request body")
+                return
+            }
+            body.append(buffer, count: n)
+        }
+        processRoute(method: method, path: path, body: body, clientSocket: clientSocket)
+    }
 
-        processRoute(method: method, path: path, body: bodyData, clientSocket: clientSocket)
+    private func secretsMatch(_ provided: String) -> Bool {
+        // Compare fixed-length digests without early exit.
+        let a = Array(TossSecurityUtils.sha256Hex(of: provided).utf8)
+        let b = Array(TossSecurityUtils.sha256Hex(of: pairingSecret).utf8)
+        var difference: UInt8 = 0
+        for i in a.indices { difference |= a[i] ^ b[i] }
+        return difference == 0
+    }
+
+    private func issueSession() -> String? {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        let now = Date()
+        validSessionTokens = validSessionTokens.filter { $0.value > now }
+        guard validSessionTokens.count < 1024 else { return nil }
+        let token = UUID().uuidString.lowercased()
+        validSessionTokens[token] = now.addingTimeInterval(sessionLifetime)
+        return token
+    }
+
+    private func validSession(_ token: String) -> Bool {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        guard let expiration = validSessionTokens[token], expiration > Date() else {
+            validSessionTokens.removeValue(forKey: token)
+            return false
+        }
+        return true
     }
 
     private func processRoute(method: String, path: String, body: Data, clientSocket: Int32) {
@@ -196,9 +278,11 @@ public final class ReceiverServer {
         do {
             let decoder = JSONDecoder()
             let req = try decoder.decode(PairingRequest.self, from: body)
-            if req.pairingSecret == self.pairingSecret {
-                let sessionToken = UUID().uuidString.lowercased()
-                validSessionTokens.insert(sessionToken)
+            if secretsMatch(req.pairingSecret) {
+                guard let sessionToken = issueSession() else {
+                    sendResponse(clientSocket: clientSocket, status: 503, body: "Session capacity reached")
+                    return
+                }
                 let resp = PairingResponse(accepted: true, token: sessionToken, receiverName: receiverName, message: "Paired successfully")
                 let respData = try JSONEncoder().encode(resp)
                 sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: respData)
@@ -219,7 +303,7 @@ public final class ReceiverServer {
             let payload = try decoder.decode(TransferPayload.self, from: body)
 
             // Validate session token
-            guard validSessionTokens.contains(payload.authToken) else {
+            guard validSession(payload.authToken) else {
                 sendResponse(clientSocket: clientSocket, status: 401, body: "Unauthorized: Invalid or expired session token")
                 return
             }
@@ -231,18 +315,29 @@ public final class ReceiverServer {
             }
             let handoff = try TossHandoff.fromJSONData(jsonData)
 
-            // Check manifest checksums
+            guard handoff.schemaVersion == TossHandoff.currentSchemaVersion,
+                  payload.manifest.schemaVersion == handoff.schemaVersion,
+                  payload.manifest.handoffId == handoff.handoffId,
+                  payload.manifest.title == handoff.title,
+                  UUID(uuidString: handoff.handoffId) != nil,
+                  UUID(uuidString: handoff.projectId) != nil,
+                  payload.manifest.files.count == 2,
+                  Set(payload.manifest.files.map(\.filename)) == Set(["handoff.json", "handoff.md"]) else {
+                sendResponse(clientSocket: clientSocket, status: 422, body: "Invalid transfer manifest")
+                return
+            }
+            // Check manifest checksums and sizes
             for fileItem in payload.manifest.files {
                 let expected = fileItem.checksumSha256
                 if fileItem.filename == "handoff.json" {
                     let actual = TossSecurityUtils.sha256Hex(of: payload.jsonContent)
-                    if actual != expected {
+                    if actual != expected || fileItem.sizeBytes != jsonData.count {
                         sendResponse(clientSocket: clientSocket, status: 422, body: "Checksum mismatch for handoff.json")
                         return
                     }
                 } else if fileItem.filename == "handoff.md" {
                     let actual = TossSecurityUtils.sha256Hex(of: payload.markdownContent)
-                    if actual != expected {
+                    if actual != expected || fileItem.sizeBytes != payload.markdownContent.utf8.count {
                         sendResponse(clientSocket: clientSocket, status: 422, body: "Checksum mismatch for handoff.md")
                         return
                     }
@@ -251,15 +346,45 @@ public final class ReceiverServer {
 
             // Sanitize folder name
             let safeTitle = TossSecurityUtils.sanitizeFilename(handoff.title)
-            let folderName = "\(handoff.createdAt.prefix(10))_\(safeTitle)_\(handoff.handoffId.prefix(8))"
+            let safeDate = TossSecurityUtils.sanitizeFilename(String(handoff.createdAt.prefix(10)))
+            let revisionSuffix = handoff.revision > 1 ? "_r\(handoff.revision)" : ""
+            let folderName = "\(safeDate)_\(safeTitle)_\(handoff.handoffId.prefix(8))\(revisionSuffix)"
             let targetDir = storageDirectory.appendingPathComponent(folderName, isDirectory: true)
 
-            try FileManager.default.createDirectory(at: targetDir, withIntermediateDirectories: true)
+            transferLock.lock()
+            defer { transferLock.unlock() }
+            let fm = FileManager.default
+            if let attrs = try? fm.attributesOfItem(atPath: targetDir.path), attrs[.type] as? FileAttributeType != .typeDirectory {
+                sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination")
+                return
+            }
+            try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+            guard targetDir.resolvingSymlinksInPath().deletingLastPathComponent().path == storageDirectory.resolvingSymlinksInPath().path else {
+                sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination")
+                return
+            }
 
             let jsonURL = targetDir.appendingPathComponent("handoff.json")
             let mdURL = targetDir.appendingPathComponent("handoff.md")
             let receiptURL = targetDir.appendingPathComponent("receipt.json")
 
+            for url in [jsonURL, mdURL, receiptURL] {
+                if let attrs = try? fm.attributesOfItem(atPath: url.path), attrs[.type] as? FileAttributeType != .typeRegular {
+                    sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination file")
+                    return
+                }
+            }
+            if fm.fileExists(atPath: receiptURL.path) {
+                guard let oldReceipt = try? JSONDecoder().decode(TransferAck.self, from: Data(contentsOf: receiptURL)),
+                      oldReceipt.handoffId == handoff.handoffId,
+                      (try? Data(contentsOf: jsonURL)) == jsonData,
+                      (try? Data(contentsOf: mdURL)) == Data(payload.markdownContent.utf8) else {
+                    sendResponse(clientSocket: clientSocket, status: 409, body: "Existing receipt conflicts with payload")
+                    return
+                }
+                sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: try JSONEncoder().encode(oldReceipt))
+                return
+            }
             try payload.jsonContent.write(to: jsonURL, atomically: true, encoding: .utf8)
             try payload.markdownContent.write(to: mdURL, atomically: true, encoding: .utf8)
 
@@ -272,7 +397,7 @@ public final class ReceiverServer {
             )
 
             let ackData = try JSONEncoder().encode(ack)
-            try ackData.write(to: receiptURL)
+            try ackData.write(to: receiptURL, options: .atomic)
 
             print("[TOSS Receiver] Successfully received handoff '\(handoff.title)' to \(targetDir.path)")
             sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: ackData)
@@ -302,6 +427,12 @@ public final class ReceiverServer {
         case 400: statusText = "Bad Request"
         case 401: statusText = "Unauthorized"
         case 404: statusText = "Not Found"
+        case 408: statusText = "Request Timeout"
+        case 409: statusText = "Conflict"
+        case 411: statusText = "Length Required"
+        case 413: statusText = "Payload Too Large"
+        case 431: statusText = "Request Header Fields Too Large"
+        case 503: statusText = "Service Unavailable"
         case 422: statusText = "Unprocessable Entity"
         default: statusText = "Server Error"
         }
@@ -311,10 +442,21 @@ public final class ReceiverServer {
         header += "Content-Length: \(data.count)\r\n"
         header += "Connection: close\r\n\r\n"
 
-        if let headerData = header.data(using: .utf8) {
-            _ = headerData.withUnsafeBytes { write(clientSocket, $0.baseAddress, headerData.count) }
+        var response = Data(header.utf8)
+        response.append(data)
+        response.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                #if canImport(Darwin)
+                let n = send(clientSocket, base.advanced(by: offset), bytes.count - offset, 0)
+                #else
+                let n = send(clientSocket, base.advanced(by: offset), bytes.count - offset, Int32(MSG_NOSIGNAL))
+                #endif
+                guard n > 0 else { return }
+                offset += n
+            }
         }
-        _ = data.withUnsafeBytes { write(clientSocket, $0.baseAddress, data.count) }
     }
 }
 

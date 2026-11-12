@@ -22,3 +22,7 @@ Phase 2 starts from main 39c17b9. Review the phase2-gpt-refinements branch and i
     ./bin/toss-test-runner
 
 Physical microphone, Bonjour Wi-Fi and live Gemini accuracy require real devices / credentials. Passing CI is not a substitute.
+
+## Phase 3 progress (GPT pre-hardening; Claude review still required)
+
+Branch `phase3-hardening`, draft PR #2. Phase 2 CI passed 14/14 and simulator compilation. The current Phase 3 branch implements bounded request headers/body (16 KiB/10 MiB), socket deadlines, 16 concurrent connections, session expiry with synchronized storage, manifest validation, replay receipt reuse, and durable revision snapshots. It adds negative receiver tests and revision persistence/transfer assertions. Inspect latest CI before marking these verified. Remaining: queue scheduling/Keychain, pairing secret setup and LAN transport protection, comprehensive adversarial tests, physical iPhone/Mac, Gemini, signed packaging and independent Claude review. The default development secret remains unchanged; do not expose the receiver on an untrusted network.

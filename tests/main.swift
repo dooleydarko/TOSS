@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 #if canImport(TossSchema)
 import TossSchema
 #endif
@@ -86,7 +89,11 @@ testCase("History Engine Revisions and Diffing") {
     assert(diff.newlyCompletedActions == ["Action 1"], "Diff must report newly completed action")
 
     let searchResults = engine.search(query: "Searchable")
-    assert(searchResults.count == 1, "Search must find handoff by keyword")
+    assert(searchResults.count == 1, "Search must find latest handoff by keyword")
+    assert(engine.history(forProjectId: base.projectId).map(\.revision) == [1, 2])
+    let reloaded = TossHistoryEngine(storageURL: tempURL)
+    assert(reloaded.history(forProjectId: base.projectId).map(\.revision) == [1, 2])
+    assert(reloaded.search(query: "Searchable").first?.revision == 2)
 }
 
 testCase("Empty Title Fails Validation") {
@@ -308,6 +315,68 @@ Task {
         let diskData = try Data(contentsOf: URL(fileURLWithPath: jsonPath))
         let diskHandoff = try TossHandoff.fromJSONData(diskData)
         assert(diskHandoff.title == handoff.title, "Saved content must match original")
+        let repeated = try await client.sendHandoff(handoff, to: device, authToken: token)
+        assert(repeated.receiptId == ack.receiptId, "Identical replay must return original receipt")
+        var revision = handoff
+        revision.revision = 2
+        revision.requirements.append("Second revision")
+        let updated = try await client.sendHandoff(revision, to: device, authToken: token)
+        assert(updated.savedToDirectory != ack.savedToDirectory, "Revision must have a separate destination")
+        assert(FileManager.default.fileExists(atPath: jsonPath), "Original revision must remain on disk")
+    }
+
+    await testCaseAsync("Receiver rejects oversized and incomplete manifests and expired sessions") {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("toss_security_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let server = ReceiverServer(port: 7456, storageDirectory: tempDir, pairingSecret: "test-secret", sessionLifetime: 2)
+        try server.start()
+        defer { server.stop() }
+        let client = TossClient()
+        let device = TossDevice(id: "security-test", name: "Security Test", host: "127.0.0.1", port: 7456)
+        #if canImport(Darwin)
+        func rawStatus(_ header: String) throws -> String {
+            let fd = socket(AF_INET, SOCK_STREAM, 0)
+            guard fd >= 0 else { throw ReceiverError.socketFailed("Test socket") }
+            defer { close(fd) }
+            var addr = sockaddr_in()
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = UInt16(7456).bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+            let connected = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            }
+            guard connected == 0 else { throw ReceiverError.socketFailed("Test connect") }
+            var timeout = timeval(tv_sec: 3, tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            let data = Data(header.utf8)
+            let sent = data.withUnsafeBytes { send(fd, $0.baseAddress, data.count, 0) }
+            guard sent == data.count else { throw ReceiverError.socketFailed("Test send") }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            let count = read(fd, &bytes, bytes.count)
+            guard count > 0 else { throw ReceiverError.socketFailed("Test read") }
+            return String(decoding: bytes.prefix(count), as: UTF8.self)
+        }
+        let oversized = try rawStatus("POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10485761\r\n\r\n")
+        assert(oversized.contains("413"))
+        let ambiguous = try rawStatus("POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n")
+        assert(ambiguous.contains("400"))
+        #endif
+        let token = try await client.pair(with: device, pairingSecret: "test-secret")
+        let handoff = TossHandoff(title: "Security Test", destination: .gpt, objective: "Verify rejection", context: "", source: TossSource(type: .text))
+        let json = String(decoding: try handoff.toJSONData(), as: UTF8.self)
+        let payload = TransferPayload(authToken: token, manifest: TransferManifest(handoffId: handoff.handoffId, title: handoff.title, schemaVersion: handoff.schemaVersion, files: []), markdownContent: handoff.toMarkdown(), jsonContent: json)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:7456/transfer")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+        let (_, invalidResponse) = try await URLSession.shared.data(for: request)
+        assert((invalidResponse as? HTTPURLResponse)?.statusCode == 422)
+        try await Task.sleep(nanoseconds: 2_100_000_000)
+        var rejected = false
+        do { _ = try await client.sendHandoff(handoff, to: device, authToken: token) }
+        catch { rejected = true }
+        assert(rejected, "Expired session must reject transfer")
+        assert((try? FileManager.default.contentsOfDirectory(atPath: tempDir.path))?.isEmpty == true)
     }
 
     print("\n===============================")
