@@ -344,7 +344,7 @@ public struct TossView: View {
                     .frame(width: 300, height: 230)
                     .background(Color.white)
                     .cornerRadius(20)
-                    .shadow(color: Color.black.opacity(min(0.25, 0.08 + abs(dragOffset.height) / 600)), radius: 14, x: 0, y: 8)
+                    .shadow(color: Color.black.opacity(min(0.25, 0.08 + Double(abs(dragOffset.height)) / 600.0)), radius: 14, x: 0, y: 8)
                     .offset(x: dragOffset.width * 0.4, y: dragOffset.height)
                     .rotationEffect(.degrees(Double(dragOffset.width) / 14.0))
                     .scaleEffect(max(0.86, 1.0 - abs(dragOffset.height) / 900.0))
