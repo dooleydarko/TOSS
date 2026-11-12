@@ -214,59 +214,93 @@ public struct ReviewView: View {
     }
 }
 
-// MARK: - Toss View (Swipe & Send)
+// MARK: - Toss View (Swipe & Send with Spring Physics)
 public struct TossView: View {
     @EnvironmentObject var store: TossStore
     @State private var dragOffset: CGSize = .zero
     @State private var isSending: Bool = false
     @State private var statusMessage: String = "Ready to Toss"
+    @State private var tossSuccessful: Bool = false
 
     public init() {}
 
     public var body: some View {
         VStack(spacing: 20) {
+            // Target Receiver Banner
             if let targetDevice = store.pairedDevices.first {
                 HStack {
                     Image(systemName: "laptopcomputer")
-                        .font(.title)
+                        .font(.title2)
                         .foregroundColor(.blue)
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(targetDevice.name)
                             .font(.headline)
-                        Text("\(targetDevice.host):\(targetDevice.port)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 8, height: 8)
+                            Text("\(targetDevice.host):\(targetDevice.port) • Local Wi-Fi")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
                     }
                     Spacer()
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 10, height: 10)
+                    if store.isDiscoveryActive {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    }
                 }
                 .padding()
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+                .background(Color.blue.opacity(0.08))
+                .cornerRadius(14)
                 .padding(.horizontal)
 
                 Spacer()
 
-                // Swipeable Card
+                // Swipeable Card with Spring Physics & Rotation
                 if let handoff = store.currentHandoff {
-                    VStack(spacing: 12) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundColor(.blue)
+                    VStack(spacing: 14) {
+                        Image(systemName: tossSuccessful ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(tossSuccessful ? .green : .blue)
+                            .scaleEffect(tossSuccessful ? 1.2 : 1.0)
+                            .animation(.spring(response: 0.3), value: tossSuccessful)
+
                         Text(handoff.title)
-                            .font(.headline)
+                            .font(.title3)
+                            .fontWeight(.bold)
                             .multilineTextAlignment(.center)
-                        Text("Swipe up or press Send to Toss")
-                            .font(.caption)
+                            .padding(.horizontal)
+
+                        Text("Swipe up to toss to your Mac")
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
+
+                        HStack(spacing: 8) {
+                            Text("Rev \(handoff.revision)")
+                                .font(.caption2)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.gray.opacity(0.15))
+                                .cornerRadius(6)
+                            Text(handoff.destination.rawValue.uppercased())
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.blue.opacity(0.15))
+                                .foregroundColor(.blue)
+                                .cornerRadius(6)
+                        }
                     }
-                    .frame(width: 280, height: 200)
+                    .frame(width: 300, height: 230)
                     .background(Color.white)
-                    .cornerRadius(16)
-                    .shadow(radius: 8)
-                    .offset(y: dragOffset.height)
+                    .cornerRadius(20)
+                    .shadow(color: Color.black.opacity(min(0.25, 0.08 + abs(dragOffset.height) / 600)), radius: 14, x: 0, y: 8)
+                    .offset(x: dragOffset.width * 0.4, y: dragOffset.height)
+                    .rotationEffect(.degrees(Double(dragOffset.width) / 14.0))
+                    .scaleEffect(max(0.86, 1.0 - abs(dragOffset.height) / 900.0))
+                    .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.72), value: dragOffset)
                     .gesture(
                         DragGesture()
                             .onChanged { gesture in
@@ -276,9 +310,14 @@ public struct TossView: View {
                             }
                             .onEnded { gesture in
                                 if gesture.translation.height < -120 {
+                                    withAnimation(.easeOut(duration: 0.3)) {
+                                        dragOffset = CGSize(width: gesture.translation.width, height: -650)
+                                    }
                                     triggerSend(device: targetDevice)
                                 } else {
-                                    withAnimation { dragOffset = .zero }
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
+                                        dragOffset = .zero
+                                    }
                                 }
                             }
                     )
@@ -286,11 +325,12 @@ public struct TossView: View {
 
                 Spacer()
 
-                // Status Indicator
-                VStack(spacing: 8) {
+                // Status & Receipt Indicator
+                VStack(spacing: 6) {
                     if let state = store.activeTransferState {
                         Text(state.description)
                             .font(.subheadline)
+                            .fontWeight(.medium)
                             .foregroundColor(state == .received ? .green : .blue)
                     }
                     if let receipt = store.lastReceipt {
@@ -311,18 +351,26 @@ public struct TossView: View {
                     .padding()
                     .background(Color.blue)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(14)
                     .padding(.horizontal)
                 }
                 .disabled(isSending)
                 .padding(.bottom, 16)
 
             } else {
-                Text("No paired Mac receiver found.")
-                    .foregroundColor(.secondary)
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Searching for local Mac receivers via Bonjour...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
             }
         }
         .navigationTitle("Toss to Mac")
+        .onAppear {
+            store.startDiscovery()
+        }
     }
 
     private func triggerSend(device: TossDevice) {
@@ -330,12 +378,67 @@ public struct TossView: View {
         Task {
             do {
                 _ = try await store.tossCurrentHandoff(to: device)
-                withAnimation { dragOffset = CGSize(width: 0, height: -600) }
+                tossSuccessful = true
                 isSending = false
             } catch {
                 isSending = false
-                withAnimation { dragOffset = .zero }
+                withAnimation(.spring()) {
+                    dragOffset = .zero
+                }
             }
+        }
+    }
+}
+
+// MARK: - Queue & Sync View
+public struct QueueView: View {
+    @EnvironmentObject var store: TossStore
+
+    public init() {}
+
+    public var body: some View {
+        NavigationView {
+            List {
+                if store.queue.items.isEmpty {
+                    Text("No queued transfers. All handoffs delivered!")
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 8)
+                } else {
+                    ForEach(store.queue.items) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(item.handoff.title)
+                                .font(.headline)
+                            HStack {
+                                Text("Target: \(item.targetDevice.name)")
+                                Spacer()
+                                statusBadge(for: item.status)
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle("Offline Queue")
+            .toolbar {
+                Button("Retry All") {
+                    store.queue.retryFailedItems()
+                }
+            }
+        }
+    }
+
+    private func statusBadge(for status: QueueStatus) -> some View {
+        switch status {
+        case .pending:
+            return Text("Pending").foregroundColor(.orange)
+        case .retrying(let n):
+            return Text("Retry #\(n)").foregroundColor(.blue)
+        case .completed:
+            return Text("Delivered").foregroundColor(.green)
+        case .failed:
+            return Text("Failed").foregroundColor(.red)
         }
     }
 }
@@ -439,6 +542,10 @@ public struct TossAppView: View {
             HistoryView()
                 .tabItem {
                     Label("History", systemImage: "clock.fill")
+                }
+            QueueView()
+                .tabItem {
+                    Label("Queue", systemImage: "arrow.triangle.2.circlepath")
                 }
             SettingsView()
                 .tabItem {

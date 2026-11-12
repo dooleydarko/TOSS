@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://toss.project/schemas/v1/handoff.schema.json",
+  "title": "TossHandoff",
+  "description": "Standardized schema for TOSS AI handoffs transferred between iPhone and Mac",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "handoffId",
+    "projectId",
+    "title",
+    "createdAt",
+    "updatedAt",
+    "revision",
+    "destination",
+    "objective",
+    "context",
+    "requirements",
+    "constraints",
+    "completed",
+    "nextActions",
+    "knownIssues",
+    "source"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "handoffId": {
+      "type": "string"
+    },
+    "projectId": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAt": {
+      "type": "string"
+    },
+    "updatedAt": {
+      "type": "string"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "destination": {
+      "type": "string",
+      "enum": ["antigravity", "gpt", "claude", "generic"]
+    },
+    "objective": {
+      "type": "string"
+    },
+    "context": {
+      "type": "string"
+    },
+    "requirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "completed": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "nextActions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "knownIssues": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "repository": {
+      "type": ["object", "null"],
+      "properties": {
+        "url": { "type": ["string", "null"] },
+        "branch": { "type": ["string", "null"] },
+        "commit": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["filename", "contentType", "sizeBytes"],
+        "properties": {
+          "filename": { "type": "string" },
+          "contentType": { "type": "string" },
+          "sizeBytes": { "type": "integer", "minimum": 0 },
+          "checksumSha256": { "type": "string" }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "required": ["type", "transcriptAvailable"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["voice", "text", "edited"]
+        },
+        "transcriptAvailable": {
+          "type": "boolean"
+        },
+        "rawInput": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

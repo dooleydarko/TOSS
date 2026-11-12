@@ -1,0 +1,38 @@
+name: TOSS
+options:
+  bundleIdPrefix: com.dooleydarko.toss
+  deploymentTarget:
+    iOS: "15.0"
+    macOS: "12.0"
+
+settings:
+  SWIFT_VERSION: "5.7"
+  ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+targets:
+  TOSS-iOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: apps/ios/Sources
+      - path: packages/handoff-schema/Sources
+      - path: packages/transfer-protocol/Sources
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.dooleydarko.toss.ios
+      INFOPLIST_KEY_UILaunchScreen_Generation: YES
+      INFOPLIST_KEY_NSLocalNetworkUsageDescription: "TOSS uses the local network to discover and transfer handoffs to paired Macs."
+      INFOPLIST_KEY_NSBonjourServices:
+        - "_toss._tcp"
+      INFOPLIST_KEY_NSMicrophoneUsageDescription: "TOSS uses your microphone to transcribe ideas and instructions into structured handoffs."
+
+  TOSS-Receiver:
+    type: tool
+    platform: macOS
+    deploymentTarget: "12.0"
+    sources:
+      - path: apps/macos-receiver/Sources
+      - path: packages/handoff-schema/Sources
+      - path: packages/transfer-protocol/Sources
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.dooleydarko.toss.receiver

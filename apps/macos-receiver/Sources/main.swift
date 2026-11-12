@@ -43,15 +43,21 @@ while i < args.count {
 }
 
 let storageURL = URL(fileURLWithPath: storageDir)
+let receiverName = Host.current().localizedName ?? "Mac Receiver"
 let server = ReceiverServer(
     host: host,
     port: port,
     storageDirectory: storageURL,
-    pairingSecret: secret
+    pairingSecret: secret,
+    receiverName: receiverName
 )
+
+let discovery = TossDiscoveryService()
+discovery.startAdvertising(name: receiverName, port: Int32(port))
 
 signal(SIGINT) { _ in
     print("\n[TOSS Receiver] Terminating on SIGINT...")
+    discovery.stopAdvertising()
     exit(0)
 }
 

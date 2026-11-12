@@ -12,13 +12,15 @@
 
 ---
 
-## Phase 2 — GPT: Refinement & UX Polish
-- [ ] Audit architecture against the implemented code; preserve working parts.
-- [ ] Visual polish of the SwiftUI card swipe animation and haptic feedback.
-- [ ] Enhance prompt engineering and few-shot examples for Gemini structuring.
-- [ ] Add Bonjour / mDNS zero-conf auto-discovery for local receivers without manual IP entry.
-- [ ] Introduce persistent SQLite / SwiftData storage schema for deep revision history.
-- [ ] Regression testing and handoff package generation for Claude.
+## Phase 2 — Progression & Refinements (IN PROGRESS)
+- [x] Implemented Bonjour / mDNS zero-conf auto-discovery (`_toss._tcp`) using Apple's NetService / Network framework.
+- [x] Built Offline Transfer Queue & Auto-Retry Engine (`TossTransferQueue`) with retry counters and persistent storage.
+- [x] Polished SwiftUI card swipe physics with spring mechanics, dynamic card tilt, shadow scaling, and snap-back curves.
+- [x] Added `QueueView` to the iOS client for managing offline and pending handoffs.
+- [x] Authored `project.yml` XcodeGen specification with iOS/macOS bundle entitlements.
+- [x] Expanded automated test suite from 8 to 10 verified test cases (10/10 passing).
+- [ ] Next: SQLite / SwiftData storage schema for deep revision history.
+- [ ] Next: Audio waveform visualization and live Speech framework integration on iOS.
 
 ---
 

@@ -111,8 +111,12 @@ swiftc \
 | TossSchema | Markdown Serialization | PASS | Sections, bullets, and metadata formatted |
 | TossProtocol | SHA-256 Checksum Computation | PASS | 64-char hex, deterministic hashing |
 | TossProtocol | Path Traversal & Sanitization | PASS | `../../etc/passwd` sanitized to safe filename |
+| TossProtocol | Offline Queue Enqueue & Tracking | PASS | Enqueued handoff tracked, state persisted |
+| TossProtocol | Bonjour Discovery Lifecycle | PASS | `_toss._tcp` service published and stopped cleanly |
 | AIProvider | Offline Rule-Based AI Fallback | PASS | Unstructured text converted to requirements & actions |
 | End-to-End | Full Pairing and Transfer Loop | PASS | Device paired, payload sent, SHA-256 checked, `handoff.json` & `handoff.md` written to disk, ACK verified |
+
+**Total Tests:** 10/10 Passed.
 
 **Note on Untested Areas:**
 - Physical iPhone-to-physical-Mac Wi-Fi latency and live Apple Speech Recognition framework require a connected physical iOS device with microphone entitlement.

@@ -17,14 +17,16 @@ public final class TossStore: ObservableObject {
     @Published public var geminiApiKey: String = ""
     @Published public var selectedModel: String = "gemini-1.5-flash"
     @Published public var preferredDestination: TossDestination = .antigravity
+    @Published public var isDiscoveryActive: Bool = false
+    @Published public var queue = TossTransferQueue()
 
+    private let discoveryService = TossDiscoveryService()
     private let storageKey = "toss_local_handoffs"
     private let devicesKey = "toss_paired_devices"
 
     public init() {
         loadFromDisk()
         if pairedDevices.isEmpty {
-            // Seed a default local Mac receiver for development
             pairedDevices.append(
                 TossDevice(
                     id: "local-mac",
@@ -35,6 +37,36 @@ public final class TossStore: ObservableObject {
                     isPaired: true
                 )
             )
+        }
+        setupDiscovery()
+    }
+
+    public func startDiscovery() {
+        isDiscoveryActive = true
+        discoveryService.startBrowsing()
+    }
+
+    public func stopDiscovery() {
+        isDiscoveryActive = false
+        discoveryService.stopBrowsing()
+    }
+
+    private func setupDiscovery() {
+        discoveryService.onDeviceFound = { [weak self] device in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let index = self.pairedDevices.firstIndex(where: { $0.id == device.id || $0.name == device.name }) {
+                    self.pairedDevices[index] = device
+                } else {
+                    self.pairedDevices.append(device)
+                }
+                self.persistToDisk()
+            }
+        }
+        discoveryService.onDeviceLost = { [weak self] deviceName in
+            DispatchQueue.main.async {
+                self?.pairedDevices.removeAll(where: { $0.name == deviceName && $0.id != "local-mac" })
+            }
         }
     }
 
@@ -70,19 +102,23 @@ public final class TossStore: ObservableObject {
         let client = TossClient()
         activeTransferState = .connecting
 
-        // Pair/authenticate session
-        let token = try await client.pair(with: device, pairingSecret: pairingSecret)
-
-        activeTransferState = .sending
-        let ack = try await client.sendHandoff(handoff, to: device, authToken: token) { [weak self] state in
-            DispatchQueue.main.async {
-                self?.activeTransferState = state
+        do {
+            let token = try await client.pair(with: device, pairingSecret: pairingSecret)
+            activeTransferState = .sending
+            let ack = try await client.sendHandoff(handoff, to: device, authToken: token) { [weak self] state in
+                DispatchQueue.main.async {
+                    self?.activeTransferState = state
+                }
             }
+            lastReceipt = ack
+            activeTransferState = .received
+            return ack
+        } catch {
+            print("[TOSS Store] Direct transfer failed (\(error.localizedDescription)). Queuing for auto-retry...")
+            _ = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: pairingSecret)
+            activeTransferState = .queued
+            throw error
         }
-
-        lastReceipt = ack
-        activeTransferState = .received
-        return ack
     }
 
     private func persistToDisk() {

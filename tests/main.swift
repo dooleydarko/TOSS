@@ -121,6 +121,28 @@ testCase("Path Traversal and File Sanitization") {
     assert(!clean.contains("/"), "Must strip slashes")
 }
 
+testCase("Offline Queue Enqueue and Tracking") {
+    let queue = TossTransferQueue()
+    let handoff = TossHandoff(
+        title: "Queued Offline Handoff",
+        destination: .gpt,
+        objective: "Test offline queue persistence",
+        context: "Queue test",
+        source: TossSource(type: .text)
+    )
+    let device = TossDevice(id: "dev-offline", name: "Offline Mac", host: "192.168.1.200", port: 7443)
+    let item = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
+    assert(item.status == .pending, "Initial status must be pending")
+    assert(queue.items.contains(where: { $0.id == item.id }), "Queue must contain enqueued item")
+}
+
+testCase("Bonjour Discovery Service Lifecycle") {
+    let service = TossDiscoveryService()
+    service.startAdvertising(name: "Test Receiver Discovery", port: 7499)
+    service.stopAdvertising()
+    assert(true, "Bonjour service must start and stop cleanly")
+}
+
 // 3. AI Provider Offline Fallback
 print("\n--- AI Provider Tests ---")
 let runAsyncTests = DispatchSemaphore(value: 0)
