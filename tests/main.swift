@@ -166,6 +166,13 @@ testCase("JSON Serialization Round-trip") {
     assert(original.destination == decoded.destination, "Destination must match")
 }
 
+testCase("Plain text export preserves original notes and structured content") {
+    let handoff = TossHandoff(title: "Export Test", objective: "Objective text", context: "Context text", requirements: ["Requirement one"], source: TossSource(type: .text, rawInput: "Original note"))
+    let text = handoff.toPlainText()
+    assert(text.contains("Export Test") && text.contains("Requirement one") && text.contains("Original note"))
+    assert(!text.hasPrefix("#"))
+}
+
 testCase("Markdown Serialization") {
     let handoff = TossHandoff(
         title: "Markdown Title",
@@ -444,6 +451,9 @@ Task {
         assert(ack.handoffId == handoff.handoffId, "ACK handoff ID must match")
         assert(ack.receivedFiles.contains("handoff.json"), "Must contain handoff.json")
         assert(ack.receivedFiles.contains("handoff.md"), "Must contain handoff.md")
+        assert(ack.receivedFiles.contains("handoff.txt"), "Must contain handoff.txt")
+        let exportedText = try String(contentsOf: URL(fileURLWithPath: ack.savedToDirectory).appendingPathComponent("handoff.txt"), encoding: .utf8)
+        assert(exportedText == handoff.toPlainText())
 
         // Verify disk files
         let savedDir = URL(fileURLWithPath: ack.savedToDirectory)

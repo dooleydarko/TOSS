@@ -413,31 +413,46 @@ public final class ReceiverServer {
             let jsonURL = targetDir.appendingPathComponent("handoff.json")
             let mdURL = targetDir.appendingPathComponent("handoff.md")
             let receiptURL = targetDir.appendingPathComponent("receipt.json")
+            let textURL = targetDir.appendingPathComponent("handoff.txt")
 
-            for url in [jsonURL, mdURL, receiptURL] {
+            for url in [jsonURL, mdURL, textURL, receiptURL] {
                 if let attrs = try? fm.attributesOfItem(atPath: url.path), attrs[.type] as? FileAttributeType != .typeRegular {
                     sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination file", secure: secure)
                     return
                 }
             }
             if fm.fileExists(atPath: receiptURL.path) {
-                guard let oldReceipt = try? JSONDecoder().decode(TransferAck.self, from: Data(contentsOf: receiptURL)),
+                guard var oldReceipt = try? JSONDecoder().decode(TransferAck.self, from: Data(contentsOf: receiptURL)),
                       oldReceipt.handoffId == handoff.handoffId,
                       (try? Data(contentsOf: jsonURL)) == jsonData,
                       (try? Data(contentsOf: mdURL)) == Data(payload.markdownContent.utf8) else {
                     sendResponse(clientSocket: clientSocket, status: 409, body: "Existing receipt conflicts with payload", secure: secure)
                     return
                 }
+                let textData = Data(handoff.toPlainText().utf8)
+                if fm.fileExists(atPath: textURL.path) {
+                    guard (try? Data(contentsOf: textURL)) == textData else {
+                        sendResponse(clientSocket: clientSocket, status: 409, body: "Existing plain text conflicts with payload", secure: secure)
+                        return
+                    }
+                } else {
+                    try textData.write(to: textURL, options: .atomic)
+                }
+                if !oldReceipt.receivedFiles.contains("handoff.txt") {
+                    oldReceipt.receivedFiles.append("handoff.txt")
+                    try JSONEncoder().encode(oldReceipt).write(to: receiptURL, options: .atomic)
+                }
                 sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: try JSONEncoder().encode(oldReceipt), secure: secure)
                 return
             }
             try payload.jsonContent.write(to: jsonURL, atomically: true, encoding: .utf8)
             try payload.markdownContent.write(to: mdURL, atomically: true, encoding: .utf8)
+            try handoff.toPlainText().write(to: textURL, atomically: true, encoding: .utf8)
 
             let ack = TransferAck(
                 handoffId: handoff.handoffId,
                 accepted: true,
-                receivedFiles: ["handoff.json", "handoff.md"],
+                receivedFiles: ["handoff.json", "handoff.md", "handoff.txt"],
                 savedToDirectory: targetDir.path,
                 message: "Handoff successfully received, verified, and saved."
             )

@@ -65,6 +65,7 @@ private struct DesktopInbox: View {
                     ScrollView { Text(entry.handoff.toMarkdown()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                     HStack {
                         Button("Copy Markdown") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.handoff.toMarkdown(), forType: .string) }
+                        Button("Copy plain text") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.handoff.toPlainText(), forType: .string) }
                         Button("Open files") { NSWorkspace.shared.open(entry.url.deletingLastPathComponent()) }
                     }
                 } else {

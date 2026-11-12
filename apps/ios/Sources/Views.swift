@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import AVFoundation
 import Combine
 #if canImport(TossSchema)
@@ -205,6 +206,11 @@ public struct ReviewView: View {
     @State private var selectedSegment = 0
     @State private var navigateToToss = false
     @State private var editing = false
+    @State private var exporting = false
+    @State private var exportDocument = TossExportDocument(data: Data())
+    @State private var exportType: UTType = .plainText
+    @State private var exportName = "handoff"
+    @State private var exportError: String?
 
     public init() {}
 
@@ -215,6 +221,7 @@ public struct ReviewView: View {
                     Text("Overview").tag(0)
                     Text("Markdown").tag(1)
                     Text("JSON").tag(2)
+                    Text("Text").tag(3)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
@@ -239,7 +246,7 @@ public struct ReviewView: View {
                             if let raw = handoff.source.rawInput { detail("Original notes", text: raw) }
                         } else {
                             TossCard {
-                                Text(selectedSegment == 1 ? handoff.toMarkdown() : (try? String(decoding: handoff.toJSONData(), as: UTF8.self)) ?? "{}")
+                                Text(selectedSegment == 1 ? handoff.toMarkdown() : selectedSegment == 3 ? handoff.toPlainText() : (try? String(decoding: handoff.toJSONData(), as: UTF8.self)) ?? "{}")
                                     .font(.system(.footnote, design: .monospaced))
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -266,17 +273,48 @@ public struct ReviewView: View {
         .navigationTitle("Review handoff")
         .toolbar {
             if store.currentHandoff != nil {
+                Menu {
+                    Button("Markdown (.md)") { export(1) }
+                    Button("JSON (.json)") { export(2) }
+                    Button("Plain text (.txt)") { export(3) }
+                } label: { Image(systemName: "square.and.arrow.up") }
+                .accessibilityLabel("Export handoff")
                 Button("Edit") { editing = true }
                     .accessibilityIdentifier("review.edit")
                     .disabled(store.isTransferInProgress)
             }
         }
+        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: exportType, defaultFilename: exportName) { result in
+            if case .failure(let error) = result { exportError = error.localizedDescription }
+        }
+        .alert("Export failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) { exportError = nil }
+        } message: { Text(exportError ?? "") }
         .sheet(isPresented: $editing) {
             if let handoff = store.currentHandoff {
                 HandoffEditView(original: handoff)
                     .environmentObject(store)
             }
         }
+    }
+
+    private func export(_ format: Int) {
+        guard let handoff = store.currentHandoff else { return }
+        do {
+            switch format {
+            case 1:
+                exportDocument = TossExportDocument(data: Data(handoff.toMarkdown().utf8))
+                exportType = UTType(filenameExtension: "md") ?? .plainText
+            case 2:
+                exportDocument = TossExportDocument(data: try handoff.toJSONData())
+                exportType = .json
+            default:
+                exportDocument = TossExportDocument(data: Data(handoff.toPlainText().utf8))
+                exportType = .plainText
+            }
+            exportName = TossSecurityUtils.sanitizeFilename(handoff.title) + "-r\(handoff.revision)"
+            exporting = true
+        } catch { exportError = error.localizedDescription }
     }
 
     @ViewBuilder private func detail(_ title: String, text: String) -> some View {
@@ -302,6 +340,14 @@ public struct ReviewView: View {
             }
         }
     }
+}
+
+private struct TossExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText, .json, UTType(filenameExtension: "md") ?? .plainText] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
 @MainActor
