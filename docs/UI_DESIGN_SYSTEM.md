@@ -1,13 +1,13 @@
-# TOSS — shared UI foundation (v0.1)
+# TOSS — shared UI foundation (v0.2)
 Status: proposed design baseline; not yet applied to application screens.
 
 Primary reference approved by the owner: [Ronas IT — Self-care Mobile App Design Concept](https://dribbble.com/shots/23278774-Self-care-Mobile-App-Design-Concept).
-Adapt its calm, minimal, card-led hierarchy. Add restrained frosted glass surfaces as requested. This is inspiration, not a pixel-for-pixel reproduction.
+Use its calm, minimal, card-led hierarchy as the primary layout reference. Owner correction: no frosted cards, glassmorphism, translucent surfaces or backdrop blur. Use solid, simple surfaces.
 
 ## Design principles
 - Consistent geometry, spacing, typography, motion and states across every screen.
 - One clear primary action per screen; preserve existing working flows and accessibility.
-- Frosted glass is a surface treatment, not a readability requirement. Use opaque surfaces when contrast, reduced transparency, performance or platform support requires it.
+- All cards and controls use solid, opaque surfaces. No frosted glass or decorative blur.
 - Product-specific accent colors may change; component behavior and geometry remain shared.
 - Native SwiftUI for TOSS; equivalent CSS variables and reusable components for future web applications.
 
@@ -17,12 +17,11 @@ These are starting values, not sampled colors or a final brand palette.
 | Token | Light starting value | Role |
 | --- | --- | --- |
 | canvas | #F2F4F3 | App background |
-| surface | #FFFFFF | Opaque fallback |
+| surface | #FFFFFF | Solid card surface |
 | ink | #172321 | Primary text |
 | secondary | #52635F | Secondary text |
 | accent | #BCE8DA | Mint highlight, use dark foreground |
 | action | #172321 | Primary button, use white foreground |
-| glass | white 70% | Frosted overlay, contrast tested |
 | border | ink 10% | Subtle surface separation |
 | radius-card | 24 pt / px | Cards |
 | radius-control | 16 pt / px | Fields and buttons |
@@ -30,24 +29,25 @@ These are starting values, not sampled colors or a final brand palette.
 | spacing | 4, 8, 12, 16, 24, 32 | Layout scale |
 | motion | 180–280 ms | Standard transitions |
 
-Use system semantic colors for success, warning, error and dark mode; validate contrast in context. Native materials on iOS 15+; CSS backdrop-filter with opaque fallback on web. System fonts (SF on iOS, system UI stack on web), dynamic type, 44 pt minimum iOS touch targets, keyboard focus on web. Respect reduced motion and reduced transparency.
+Use system semantic colors for success, warning, error and dark mode; validate contrast in context. Use opaque SwiftUI colors and solid CSS backgrounds. System fonts (SF on iOS, system UI stack on web), dynamic type, 44 pt minimum iOS touch targets, keyboard focus on web. Respect reduced motion and reduced transparency.
 
 ## Shared components
-- Canvas, screen header, glass card, solid emphasis card, primary and secondary buttons, input field, segmented control, tab bar, status chip, empty/error/loading states.
+- Canvas, screen header, solid card, solid emphasis card, primary and secondary buttons, input field, segmented control, tab bar, status chip, empty/error/loading states.
 - Define reusable variants and central tokens. No ad hoc colors, corners or shadows in new screens.
-- Glass is best on navigation, controls and secondary cards; long transcripts and code previews need stable, high-contrast surfaces.
+- Use simple flat color blocks, with subtle borders only where needed; long transcripts and code previews need stable, high-contrast surfaces.
 - Motion: restrained feedback; the spring-based Toss gesture remains the signature interaction.
 
 ## TOSS screen mapping
-- Capture: large voice card, recording control, live waveform and editable transcript, contextual project input, structure CTA.
+- Capture/home: adapt the reference's greeting/header area into an entry point for previous handoffs, with access to search, open and edit existing handoffs. Adapt its “How you feel today” tracking area into the recording area with live microphone waveform and editable transcript. Preserve contextual project input and structure CTA.
+- Signature ball: adapt the reference's ball into a tangible handoff object. After recording, structuring and review, the user tosses the ball upward to send the completed handoff to the paired desktop. Preserve the accessible send button and transfer acknowledgment; the ball is not a substitute for delivery confirmation.
 - Review: clear overview, existing Markdown/JSON views, primary send CTA.
-- Toss: destination and transfer status, prominent swipeable card, explicit accessible send button.
-- History: searchable handoff cards, revision metadata.
+- Toss: destination and transfer status, prominent swipeable ball, explicit accessible send button.
+- History: searchable previous handoffs, revision metadata, and an edit/continue flow that preserves prior revisions; entry accessible from the home header.
 - Queue: state chips, retry action and informative empty state.
 - Settings: grouped controls with existing privacy disclosures.
 
 ## Build and review gates
-1. Introduce centralized tokens/components in isolation, then migrate Capture as reference screen.
+1. Introduce centralized tokens/components in isolation, then migrate Capture as reference screen with the header/history entry, recording tracker and ball. Wire editing and ball delivery to real store behavior, not placeholder data.
 2. Check visual consistency and behavior in light/dark modes, large text, reduced motion/transparency, small phone layouts and keyboard presentation.
 3. Reuse the components for the other screens; keep receiver, transfer, schema and storage unchanged in UI-only commits.
 4. Run regression suite and iOS simulator build for each batch; physical device verification and release remain separate.
