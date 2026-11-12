@@ -21,7 +21,7 @@ struct LiveTossDemo {
         print("2. Pairing with Mac receiver at \(device.host):\(device.port)...")
         let secret = "toss-dev-secret-change-in-production"
         let token = try await client.pair(with: device, pairingSecret: secret)
-        print("   ✓ Pairing successful! Session token: \(token)")
+        print("   ✓ Secure pairing successful!")
 
         print("3. Preparing structured handoff package...")
         let handoff = TossHandoff(

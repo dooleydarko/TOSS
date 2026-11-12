@@ -15,3 +15,6 @@ Base: 9db6c89 (previous regression workflow passed). GPT is conducting this revi
 - High: Apple signing, notarization, provisioning, privacy review, release distribution and rollback.
 - Medium: receiver lifecycle synchronization, symlink race resistance, persistent transfer identity, queue UX, and independent review.
 - Live provider credentials and real device tests not simulated by CI. Do not mark a new build passing until its own CI succeeds.
+
+## 0.1.2 follow-up
+Implemented authenticated application-layer encryption, generated pairing codes, and request-bound acknowledgments. Plaintext v1 endpoints are restricted to loopback test fixtures. This is not TLS, forward secrecy, independent device identity or production certification. Real device testing and updated queue credential recovery are still required. Review the new CI results, then continue with remaining MVP export and device management requirements.

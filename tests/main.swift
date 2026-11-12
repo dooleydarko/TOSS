@@ -504,6 +504,28 @@ Task {
         let ambiguous = try rawStatus("POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n")
         assert(ambiguous.contains("400"))
         #endif
+        // Exercise the actual encrypted HTTP route, not just the crypto helper.
+        let pair = PairingRequest(deviceId: "test", deviceName: "Replay fixture", pairingSecret: "test-secret")
+        let pairBody = try TossSecureTransport.sealRequest(JSONEncoder().encode(pair), secret: "test-secret", path: TossSecureTransport.pairPath)
+        func post(_ body: Data, path: String) async throws -> (Data, Int) {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:7456" + path)!)
+            request.httpMethod = "POST"
+            request.setValue(TossSecureTransport.contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            let (data, response) = try await URLSession.shared.data(for: request)
+            return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        let firstPair = try await post(pairBody, path: TossSecureTransport.pairPath)
+        assert(firstPair.1 == 200)
+        let opened = try TossSecureTransport.openResponse(firstPair.0, secret: "test-secret", path: TossSecureTransport.pairPath, request: pairBody, status: 200)
+        let pairing = try JSONDecoder().decode(PairingResponse.self, from: opened)
+        assert(pairing.accepted && pairing.token != nil)
+        let replay = try await post(pairBody, path: TossSecureTransport.pairPath)
+        assert(replay.1 == 409, "Encrypted pairing replay must be rejected")
+        var tampered = pairBody
+        tampered[tampered.count - 1] ^= 1
+        let corrupt = try await post(tampered, path: TossSecureTransport.pairPath)
+        assert(corrupt.1 == 401, "Tampered encrypted request must be rejected")
         let token = try await client.pair(with: device, pairingSecret: "test-secret")
         let handoff = TossHandoff(title: "Security Test", destination: .gpt, objective: "Verify rejection", context: "", source: TossSource(type: .text))
         let json = String(decoding: try handoff.toJSONData(), as: UTF8.self)
