@@ -23,7 +23,7 @@ cp "$BUILD/Build/Products/Release/TOSS-Receiver" "$MAC/toss-receiver"
 cp scripts/start-receiver.command "$MAC/Start TOSS Receiver.command"
 chmod +x "$MAC/toss-receiver" "$MAC/Start TOSS Receiver.command"
 for binary in "$MAC/toss-receiver" "$MAC/TOSS-Desktop.app/Contents/MacOS/TOSS-Desktop"; do
-  lipo -verify_arch x86_64 arm64 "$binary"
+  lipo "$binary" -verify_arch x86_64 arm64
 done
 # Ad-hoc signing is for local testing only; it is not Developer ID or notarization.
 codesign --force --sign - "$MAC/toss-receiver"
