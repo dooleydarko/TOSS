@@ -1,7 +1,7 @@
 name: TOSS Phase 2 regression
 on:
   push:
-    branches: [phase2-gpt-refinements, phase3-hardening, main]
+    branches: [phase2-gpt-refinements, phase3-hardening, ui-foundation, main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -26,9 +26,23 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate
-          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/toss-build" CODE_SIGNING_ALLOWED=NO build
+      - name: Launch iPhone simulator and capture home screen
+        if: github.ref_name == 'ui-foundation'
+        shell: bash
+        run: |
+          set -eo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in sorted(d.items(),reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" "$RUNNER_TEMP/toss-build/Build/Products/Debug-iphonesimulator/TOSS-iOS.app"
+          xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot bin/toss-home.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: regression-log
-          path: bin/regression.log
+          path: |
+            bin/regression.log
+            bin/toss-home.png

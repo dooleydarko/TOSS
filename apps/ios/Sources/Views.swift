@@ -20,94 +20,139 @@ public struct CaptureView: View {
     @State private var dictationBase = ""
     @State private var hasVoiceInput = false
     @State private var processingError: String?
+    @State private var showHistory = false
+
+    private var recordingStatus: String {
+        if isProcessing { return "Creating your handoff…" }
+        switch voice.state {
+        case .idle: return "Tap to speak"
+        case .authorizing: return "Requesting access…"
+        case .recording: return "Listening • tap to stop"
+        case .finishing: return "Finishing transcript…"
+        }
+    }
     @Environment(\.scenePhase) private var scenePhase
 
     public init() {}
 
     public var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Capture Idea or Instruction")) {
-                    ZStack(alignment: .topLeading) {
-                        if inputText.isEmpty {
-                            Text("Type your instructions or describe your feature here...")
-                                .foregroundColor(.gray.opacity(0.6))
-                                .padding(.top, 8)
-                                .padding(.leading, 4)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .center) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("TOSS").font(.caption.weight(.heavy)).tracking(3)
+                            Text("What are we building?")
+                                .font(.largeTitle.weight(.bold))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        TextEditor(text: $inputText)
-                            .frame(minHeight: 120)
-                            .disabled(voice.isBusy || isProcessing)
+                        Spacer(minLength: 12)
+                        Button { showHistory = true } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.title2)
+                                .frame(width: 48, height: 48)
+                                .background(TossDesign.surface)
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel("Previous handoffs")
+                        .disabled(voice.isBusy || isProcessing)
                     }
-
-                    HStack {
-                        Button(action: toggleRecording) {
-                            HStack {
-                                Image(systemName: voice.state == .recording ? "stop.circle.fill" : "mic.circle.fill")
-                                    .foregroundColor(voice.state == .recording ? .red : .blue)
-                                Text(voice.state == .recording ? "Stop Recording" : "Voice Dictate")
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(isProcessing || voice.state == .authorizing || voice.state == .finishing)
-                        Spacer()
-                        if !inputText.isEmpty {
-                            Button("Clear") { inputText = ""; hasVoiceInput = false }
-                                .buttonStyle(.borderless)
-                                .foregroundColor(.secondary)
-                                .disabled(voice.isBusy || isProcessing)
-                        }
-                    }
-                    if voice.state == .recording {
-                        MicrophoneWaveform(levels: voice.levels)
-                        Label("Recording • speak now", systemImage: "waveform")
-                            .font(.caption).foregroundColor(.red)
-                    } else if voice.state == .authorizing || voice.state == .finishing {
+                    .foregroundColor(TossDesign.ink)
+                    Button { showHistory = true } label: {
                         HStack {
-                            ProgressView()
-                            Text(voice.state == .authorizing ? "Requesting access…" : "Finishing transcript…")
-                        }.font(.caption)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Your handoffs").font(.headline)
+                                Text(store.handoffs.first?.title ?? "Your saved projects will appear here")
+                                    .font(.subheadline).foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                        }
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundColor(TossDesign.ink)
+                        .background(TossDesign.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: TossDesign.cardRadius))
                     }
-                    if let message = voice.errorMessage {
-                        Text(message).font(.caption).foregroundColor(.secondary)
+                    .buttonStyle(.plain)
+                    .disabled(voice.isBusy || isProcessing)
+
+                    TossCard {
+                        VStack(spacing: 8) {
+                            Text("Capture an idea").font(.title2.weight(.bold))
+                            Text("Speak naturally or type your instructions.")
+                                .font(.subheadline).foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                            TossRecordingOrb(recording: voice.state == .recording,
+                                             busy: voice.isBusy, processing: isProcessing,
+                                             action: toggleRecording)
+                            Text(recordingStatus).font(.subheadline.weight(.semibold))
+                                .foregroundColor(voice.state == .recording ? .red : .secondary)
+                            if let message = voice.errorMessage {
+                                Text(message).font(.caption).foregroundColor(.secondary)
+                            }
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Your words").font(.headline)
+                                    Spacer()
+                                    if !inputText.isEmpty {
+                                        Button("Clear") { inputText = ""; hasVoiceInput = false }
+                                            .font(.subheadline)
+                                            .disabled(voice.isBusy || isProcessing)
+                                    }
+                                }
+                                TextEditor(text: $inputText)
+                                    .frame(minHeight: 135)
+                                    .disabled(voice.isBusy || isProcessing)
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
+                                    .accessibilityLabel("Editable transcript")
+                                if inputText.isEmpty {
+                                    Text("Your spoken words will appear here.")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.top, 8)
+                            Text("Dictation prefers on-device recognition. Apple may process audio when local recognition is unavailable.")
+                                .font(.caption).foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                    Text("Dictation uses on-device speech recognition when available; otherwise Apple may process audio on its servers.")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-
-                Section(header: Text("Optional Context / Project")) {
-                    TextField("E.g. Target module, repository, or issue #", text: $contextText)
-                }
-
-                Section {
+                    TossCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Project context").font(.headline)
+                            TextField("Repository, project or issue (optional)", text: $contextText)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(isProcessing)
+                            Label(store.geminiApiKey.isEmpty ? "Offline formatter" : "Configured model: \(store.selectedModel)",
+                                  systemImage: "cpu")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text("Change AI settings in the Settings tab.")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                    }
                     Button(action: processAndStructure) {
                         HStack {
-                            Spacer()
-                            if isProcessing {
-                                ProgressView()
-                                    .padding(.trailing, 8)
-                                Text("Structuring with AI...")
-                            } else {
-                                Image(systemName: "wand.and.stars")
-                                Text("Create Structured Handoff")
-                                    .fontWeight(.semibold)
-                            }
-                            Spacer()
+                            if isProcessing { ProgressView().tint(.white) }
+                            else { Image(systemName: "sparkles") }
+                            Text(isProcessing ? "Creating handoff…" : "Create handoff")
                         }
                     }
+                    .buttonStyle(TossPrimaryButton())
                     .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing || voice.isBusy)
                     if let error = processingError {
                         Text(error).font(.caption).foregroundColor(.red)
                     }
+                    NavigationLink(destination: ReviewView(), isActive: $navigateToReview) { EmptyView() }
+                        .accessibilityHidden(true)
                 }
-
-                NavigationLink(
-                    destination: ReviewView(),
-                    isActive: $navigateToReview,
-                    label: { EmptyView() }
-                )
+                .padding(20)
             }
-            .navigationTitle("TOSS Capture")
+            .background(TossDesign.canvas.ignoresSafeArea())
+            .navigationBarHidden(true)
+            .sheet(isPresented: $showHistory) {
+                HistoryView()
+            }
         }
         .onChange(of: voice.transcript) { text in
             guard !text.isEmpty else { return }
@@ -210,6 +255,7 @@ public struct ReviewView: View {
                     .foregroundColor(.secondary)
             }
         }
+        .navigationBarHidden(false)
         .navigationTitle("Review Handoff")
     }
 
