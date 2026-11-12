@@ -96,6 +96,40 @@ testCase("History Engine Revisions and Diffing") {
     assert(reloaded.search(query: "Searchable").first?.revision == 2)
 }
 
+testCase("Review edits preserve source, revisions and JSON output") {
+    let original = TossHandoff(title: "Original", objective: "Before", context: "Context", requirements: ["One"], source: TossSource(type: .voice, transcriptAvailable: true, rawInput: "Original spoken words"))
+    var draft = original
+    draft.title = "Edited"
+    draft.requirements.append("Two")
+    draft.source.rawInput = "Must not replace original"
+    let updated = try TossReviewRevision.edited(draft, from: original, latestRevision: 1)
+    assert(updated.revision == 2 && updated.title == "Edited")
+    assert(updated.source == original.source && updated.projectId == original.projectId && updated.handoffId == original.handoffId)
+    assert(updated.requirements == ["One", "Two"])
+    let snapshots = TossReviewRevision.upsert(updated, into: [original])
+    assert(snapshots.count == 2 && TossReviewRevision.latest(in: snapshots) == [updated])
+    let restored = try JSONDecoder().decode([TossHandoff].self, from: JSONEncoder().encode(snapshots))
+    assert(restored.contains(original) && restored.contains(updated))
+    let decoded = try TossHandoff.fromJSONData(updated.toJSONData())
+    assert(decoded == updated && decoded.toMarkdown().contains("Two"))
+    let unchanged = try TossReviewRevision.edited(updated, from: updated, latestRevision: 2)
+    assert(unchanged == updated)
+    do {
+        _ = try TossReviewRevision.edited(draft, from: original, latestRevision: 2)
+        throw TossValidationError.invalidField("Stale edit accepted")
+    } catch TossValidationError.invalidField(let message) {
+        assert(message.contains("newer revision"))
+    }
+    var invalid = updated
+    invalid.title = "  "
+    do {
+        _ = try TossReviewRevision.edited(invalid, from: updated, latestRevision: 2)
+        throw TossValidationError.invalidField("Invalid title accepted")
+    } catch TossValidationError.invalidField(let message) {
+        assert(message.contains("title must not be empty"))
+    }
+}
+
 testCase("Empty Title Fails Validation") {
     let invalid = TossHandoff(
         title: "   ",

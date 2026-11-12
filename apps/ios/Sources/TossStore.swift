@@ -14,6 +14,8 @@ public final class TossStore: ObservableObject {
     @Published public var currentHandoff: TossHandoff?
     @Published public var activeTransferState: TransferState? = nil
     @Published public var lastReceipt: TransferAck? = nil
+    @Published public private(set) var isTransferInProgress = false
+    private var revisionSnapshots: [TossHandoff] = []
     @Published public var geminiApiKey: String = ""
     @Published public var selectedModel: String = "gemini-1.5-flash"
     @Published public var preferredDestination: TossDestination = .antigravity
@@ -87,12 +89,20 @@ public final class TossStore: ObservableObject {
     }
 
     public func saveHandoff(_ handoff: TossHandoff) {
-        if let index = handoffs.firstIndex(where: { $0.handoffId == handoff.handoffId }) {
-            handoffs[index] = handoff
-        } else {
-            handoffs.insert(handoff, at: 0)
-        }
+        revisionSnapshots = TossReviewRevision.upsert(handoff, into: revisionSnapshots)
+        handoffs = TossReviewRevision.latest(in: revisionSnapshots)
         persistToDisk()
+    }
+
+    public func saveReviewedHandoff(_ draft: TossHandoff, from original: TossHandoff) throws {
+        guard !isTransferInProgress,
+              currentHandoff?.handoffId == original.handoffId,
+              let latest = handoffs.first(where: { $0.handoffId == original.handoffId }) else {
+            throw TossValidationError.invalidField("The current handoff is no longer available for editing.")
+        }
+        let updated = try TossReviewRevision.edited(draft, from: original, latestRevision: latest.revision)
+        currentHandoff = updated
+        saveHandoff(updated)
     }
 
     public func tossCurrentHandoff(to device: TossDevice, pairingSecret: String = "toss-dev-secret-change-in-production") async throws -> TransferAck {
@@ -100,16 +110,22 @@ public final class TossStore: ObservableObject {
             throw TossClientError.transferFailed("No active handoff to send")
         }
 
+        guard !isTransferInProgress else {
+            throw TossClientError.transferFailed("A handoff is already being sent")
+        }
+        isTransferInProgress = true
+        defer { isTransferInProgress = false }
+        lastReceipt = nil
         let client = TossClient()
         activeTransferState = .connecting
 
         do {
             let token = try await client.pair(with: device, pairingSecret: pairingSecret)
             activeTransferState = .sending
-            let ack = try await client.sendHandoff(handoff, to: device, authToken: token) { [weak self] state in
-                DispatchQueue.main.async {
-                    self?.activeTransferState = state
-                }
+            let ack = try await client.sendHandoff(handoff, to: device, authToken: token)
+            guard ack.accepted, ack.handoffId == handoff.handoffId,
+                  !ack.receiptId.isEmpty, Set(ack.receivedFiles).isSuperset(of: ["handoff.json", "handoff.md"]) else {
+                throw TossClientError.transferFailed("Receiver did not acknowledge the expected handoff")
             }
             lastReceipt = ack
             activeTransferState = .received
@@ -123,7 +139,7 @@ public final class TossStore: ObservableObject {
     }
 
     private func persistToDisk() {
-        if let data = try? JSONEncoder().encode(handoffs) {
+        if let data = try? JSONEncoder().encode(revisionSnapshots) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
         if let data = try? JSONEncoder().encode(pairedDevices) {
@@ -134,7 +150,8 @@ public final class TossStore: ObservableObject {
     private func loadFromDisk() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let loaded = try? JSONDecoder().decode([TossHandoff].self, from: data) {
-            self.handoffs = loaded
+            self.revisionSnapshots = loaded
+            self.handoffs = TossReviewRevision.latest(in: loaded)
         }
         if let data = UserDefaults.standard.data(forKey: devicesKey),
            let loaded = try? JSONDecoder().decode([TossDevice].self, from: data) {
