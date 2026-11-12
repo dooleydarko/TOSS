@@ -1,4 +1,4 @@
-# TOSS — shared UI foundation (v0.5)
+# TOSS — shared UI foundation (v0.6)
 Status: proposed design baseline; not yet applied to application screens.
 
 Primary reference approved by the owner: [Ronas IT — Self-care Mobile App Design Concept](https://dribbble.com/shots/23278774-Self-care-Mobile-App-Design-Concept).
@@ -86,3 +86,25 @@ Applies to every coding agent (GPT, Claude, Antigravity, or others). For each ap
 2. Save approved reference screenshots and recordings, capture matching simulator states at the same viewport and appearance settings, compare side by side and flag discrepancies. Test animation and actual touch behavior separately; a still screenshot is not enough.
 3. Keep an internal component gallery for all states and reuse the same component across screens. Do not claim 100% fidelity without visual verification; report differences explicitly.
 4. Preserve the real recording/transcript, model selection, handoff structuring, editing, queue and transfer behaviors. All visual changes must pass regression and iOS build gates before integration.
+
+## Discover — project starter and handoff feed (owner requirement)
+Add a first-class public template catalog linked from the iPhone home screen/new handoff flow, then mirror it on desktop. Prioritize complete, reusable project kickoff handoffs over isolated one-line prompts. Keep private History separate. Use solid cards, no frosted effects. Provide search, category filters, preview, favorites, source/author/license and a Use Handoff action.
+
+### Source candidates for curated ingestion
+- https://github.com/github/spec-kit — project specification, planning, tasks and verification templates; best starting point for new-project handoffs.
+- https://github.com/bmad-code-org/BMAD-METHOD — project brief, PRD, UX and architecture workflows.
+- https://github.com/github/awesome-copilot — coding workflows and project planning prompts; select relevant text, not executable plugins.
+- https://github.com/alexjiaguo/agent-handoff — cross-agent handoff template, useful for continuing a project.
+- https://github.com/afest/agent-handoff — handoff templates and concrete example for session continuity.
+- https://github.com/f/prompts.chat — supplemental prompt corpus; filter developer-related entries; do not substitute generic prompts for project plans.
+Verify exact source licenses, file-level rights, commit and attribution before copying or publishing content. Public GitHub visibility alone does not authorize reuse. Where rights are unclear, link out or author an original template. Use GitHub REST Contents API (https://docs.github.com/en/rest/repos/contents) and a curated allowlist of paths with caching, rate limits, bounded size, and deduplication; no arbitrary crawling. Start with original bundled starter templates plus one importer. Source integrations are not yet implemented or tested.
+
+### Feed organization
+- Start a project: mobile app, website, SaaS dashboard, game, automation, AI agent, ecommerce, API/backend, desktop app.
+- Continue a project: cross-agent takeover, repo audit, UI refinement, bug fix, release hardening.
+- Each starter includes project objective, feature scope, architecture or decision placeholders, constraints, phases, acceptance tests and next steps. Avoid fake project status or repo details; placeholders must be labeled.
+- Preview -> Use Handoff -> editable draft -> add typed/spoken project context -> optional selected AI model structures draft -> review -> save or Toss. A complete ready-made handoff can be used without an AI call. Preserve attribution and original source separately.
+- Future optional community publishing with explicit opt-in, moderation, reporting, licensing consent and secret/private data review. Never publish users' private handoffs automatically.
+
+### Security and verification
+Treat imported prompts as untrusted content, not system instructions. Never execute external code, install agents, expose files/secrets or send handoffs automatically. Render text safely, isolate untrusted content from privileged instructions, and require review before transfer. Preserve offline fallback, source data and user edits on error. Test parsing, provenance, deduplication, filtering, offline behavior, injection resistance, editable conversion and end-to-end transfer. Keep existing iOS and receiver regression gates.
