@@ -4,8 +4,12 @@ import Combine
 
 @main
 struct TossDesktop: App {
+    @AppStorage("toss.appearance") private var appearance = "Dark"
     var body: some Scene {
-        WindowGroup { DesktopInbox().frame(minWidth: 700, minHeight: 460) }
+        WindowGroup {
+            DesktopInbox().frame(minWidth: 700, minHeight: 460)
+                .preferredColorScheme(appearance == "System" ? nil : (appearance == "Light" ? .light : .dark))
+        }
     }
 }
 
@@ -20,13 +24,26 @@ private struct DesktopInbox: View {
     @State private var selected: URL?
     @State private var query = ""
     @State private var status = ""
+    @AppStorage("toss.appearance") private var appearance = "Dark"
+    @Environment(\.colorScheme) private var scheme
+    private var canvas: Color { scheme == .dark ? Color(red: 0.047, green: 0.055, blue: 0.063) : Color(nsColor: .controlBackgroundColor) }
+    private var surface: Color { scheme == .dark ? Color(red: 0.094, green: 0.106, blue: 0.118) : Color(nsColor: .windowBackgroundColor) }
+    private var accent: Color { scheme == .dark ? Color(red: 0.737, green: 0.91, blue: 0.855) : Color(red: 0.09, green: 0.36, blue: 0.29) }
     private var filtered: [InboxEntry] {
         entries.filter { query.isEmpty || "\($0.handoff.title) \($0.handoff.objective)".localizedCaseInsensitiveContains(query) }
     }
     var body: some View {
         HStack(spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("TOSS").font(.caption.bold()).tracking(3)
+                HStack {
+                    Text("TOSS").font(.caption.bold()).tracking(3).foregroundColor(accent)
+                    Spacer()
+                    Picker("Theme", selection: $appearance) {
+                        Text("Dark").tag("Dark")
+                        Text("Light").tag("Light")
+                        Text("System").tag("System")
+                    }.labelsHidden().frame(width: 110)
+                }
                 Text("Your handoffs").font(.largeTitle.bold())
                 Button("Choose receiver folder", action: choose)
                 TextField("Search handoffs", text: $query)
@@ -40,7 +57,8 @@ private struct DesktopInbox: View {
                 }
                 Button("Refresh", action: refresh)
                 Text(status).font(.caption).foregroundColor(.secondary)
-            }.frame(width: 300)
+            }.padding(16).frame(width: 300)
+                .background(surface).clipShape(RoundedRectangle(cornerRadius: 24))
             VStack(alignment: .leading, spacing: 12) {
                 if let entry = entries.first(where: { $0.id == selected }) {
                     Text(entry.handoff.title).font(.largeTitle.bold())
@@ -55,8 +73,9 @@ private struct DesktopInbox: View {
                 }
                 Spacer()
             }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Color(nsColor: .windowBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 24))
-        }.padding(20).background(Color(nsColor: .controlBackgroundColor))
+                .background(surface).clipShape(RoundedRectangle(cornerRadius: 24))
+        }.padding(20).background(canvas.ignoresSafeArea())
+        .tint(accent)
         .onAppear(perform: refresh)
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in refresh() }
     }

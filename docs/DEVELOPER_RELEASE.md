@@ -1,4 +1,4 @@
-# TOSS 0.1.0 — developer test packages
+# TOSS 0.1.1 — developer test packages
 
 These are pre-release developer artifacts, not a production release. Download the successful **TOSS developer release packages** workflow artifact from GitHub Actions and extract its ZIPs. Verify checksums with `shasum -a 256 -c SHA256SUMS.txt`.
 
@@ -21,3 +21,6 @@ TOSS-iOS-Unsigned-Device.zip contains an unsigned build for inspection; it canno
 - Developer ID signing/notarization, iOS provisioning and store distribution are not completed.
 - No automatic execution of transferred instructions. Model credentials and quotas are user-provided.
 - GitHub artifacts are generated from the commit recorded in BUILD-COMMIT.txt. A build is available only when its workflow succeeds.
+
+## Appearance
+Dark is the default. Select Dark, Light or System under iPhone Settings > Appearance or the Mac inbox theme picker. The solid cards, mint action color and existing recording orb remain. History and transfer storage are unchanged. Visual review is still required.

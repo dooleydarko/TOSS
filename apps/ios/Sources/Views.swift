@@ -134,7 +134,7 @@ public struct CaptureView: View {
                     }
                     Button(action: processAndStructure) {
                         HStack {
-                            if isProcessing { ProgressView().tint(.white) }
+                            if isProcessing { ProgressView().tint(TossDesign.primaryForeground) }
                             else { Image(systemName: "sparkles") }
                             Text(isProcessing ? "Creating handoff…" : "Create handoff")
                         }
@@ -737,12 +737,21 @@ private struct HistoryReviewEntry: View {
 // MARK: - Settings View
 public struct SettingsView: View {
     @EnvironmentObject var store: TossStore
+    @AppStorage("toss.appearance") private var appearance = "Dark"
 
     public init() {}
 
     public var body: some View {
         NavigationView {
             Form {
+                Section(header: Text("Appearance")) {
+                    Picker("Theme", selection: $appearance) {
+                        Text("Dark").tag("Dark")
+                        Text("Light").tag("Light")
+                        Text("System").tag("System")
+                    }
+                    .accessibilityIdentifier("settings.appearance")
+                }
                 Section(header: Text("AI Structuring Provider")) {
                     Picker("Destination Target", selection: $store.preferredDestination) {
                         ForEach(TossDestination.allCases, id: \.self) { dest in
