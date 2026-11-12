@@ -61,12 +61,14 @@ public final class TossDiscoveryService: NSObject, NetServiceDelegate, NetServic
     }
 
     public func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
+        resolvingServices.removeAll { $0.name == service.name && $0.type == service.type && $0.domain == service.domain }
         onDeviceLost?(service.name)
     }
 
     // NetServiceDelegate
     public func netServiceDidResolveAddress(_ sender: NetService) {
-        guard let hostName = sender.hostName else { return }
+        guard resolvingServices.contains(where: { $0 === sender }),
+              let hostName = sender.hostName, sender.port > 0 else { return }
         let port = sender.port
         let device = TossDevice(
             id: sender.name,

@@ -162,6 +162,39 @@ public final class TossTransferQueue: ObservableObject {
         return item
     }
 
+    public func forgetReceiver(_ device: TossDevice) {
+        precondition(Thread.isMainThread)
+        // Remove queued work and credentials for this endpoint. A request
+        // already submitted to the network cannot be recalled.
+        let removed = items.filter { item in
+            guard item.targetDevice.id == device.id, item.targetDevice.host == device.host,
+                  item.targetDevice.port == device.port else { return false }
+            if case .completed = item.status { return false }
+            return true
+        }
+        for item in removed { credentials.remove(item.id) }
+        let ids = Set(removed.map(\.id))
+        items.removeAll { ids.contains($0.id) }
+        persistToDisk()
+    }
+
+    public func retryWithCode(id: String, code: String) {
+        precondition(Thread.isMainThread)
+        guard let index = items.firstIndex(where: { $0.id == id }),
+              case .failed = items[index].status, !code.isEmpty else { return }
+        guard credentials.write(id, code) else {
+            items[index].status = .failed(reason: "Could not save replacement pairing code")
+            persistToDisk()
+            return
+        }
+        items[index].pairingSecret = code
+        items[index].attempts = 0
+        items[index].lastAttemptAt = nil
+        items[index].status = .pending
+        persistToDisk()
+        triggerQueueProcessing()
+    }
+
     public func retryFailedItems() {
         precondition(Thread.isMainThread)
         for i in items.indices {
@@ -233,7 +266,9 @@ public final class TossTransferQueue: ObservableObject {
                 attempt.pairingSecret = ""
             } catch {
                 attempt.lastAttemptAt = Date()
-                if attempt.attempts >= attempt.maxAttempts {
+                if let clientError = error as? TossClientError, case .pairingRejected = clientError {
+                    attempt.status = .failed(reason: "Pairing rejected. Enter the current receiver code to retry.")
+                } else if attempt.attempts >= attempt.maxAttempts {
                     attempt.status = .failed(reason: "Max retry limit reached: \(error.localizedDescription)")
                 } else {
                     attempt.status = .retrying(attempts: attempt.attempts)

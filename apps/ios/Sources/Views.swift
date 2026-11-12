@@ -517,6 +517,9 @@ public struct TossView: View {
                                 .disabled(outcome != .ready)
                                 if let target = target {
                                     Text("\(target.host):\(target.port)").font(.caption).foregroundColor(.secondary)
+                                    if target.isPaired { Label("Saved pairing", systemImage: "lock.fill").font(.caption) }
+                                    Button("Use saved code") { pairingSecret = store.savedPairingCode(for: target) }
+                                        .disabled(!target.isPaired || outcome != .ready)
                                     SecureField("Receiver pairing code", text: $pairingSecret)
                                         .textContentType(.password)
                                         .autocapitalization(.none)
@@ -666,6 +669,8 @@ public struct QueueView: View {
 
 private struct QueueList: View {
     @ObservedObject var queue: TossTransferQueue
+    @State private var retryItem: QueuedTransfer?
+    @State private var replacementCode = ""
 
     var body: some View {
         NavigationView {
@@ -686,12 +691,30 @@ private struct QueueList: View {
                             }
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            if case .failed(let reason) = item.status {
+                                Text(reason).font(.caption).foregroundColor(.secondary)
+                                Button("Retry with new code") { replacementCode = ""; retryItem = item }
+                            }
                         }
                         .padding(.vertical, 4)
                     }
                 }
             }
             .navigationTitle("Offline Queue")
+            .sheet(item: $retryItem) { item in
+                NavigationView {
+                    Form {
+                        SecureField("New receiver code", text: $replacementCode)
+                            .autocapitalization(.none).disableAutocorrection(true)
+                        Button("Retry transfer") {
+                            queue.retryWithCode(id: item.id, code: replacementCode.trimmingCharacters(in: .whitespacesAndNewlines))
+                            replacementCode = ""; retryItem = nil
+                        }.disabled(replacementCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .navigationTitle("Update pairing code")
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { retryItem = nil; replacementCode = "" } } }
+                }
+            }
             .toolbar {
                 Button("Retry All") {
                     queue.retryFailedItems()
@@ -780,6 +803,65 @@ private struct HistoryReviewEntry: View {
     }
 }
 
+@MainActor
+private struct TossDevicesView: View {
+    @EnvironmentObject var store: TossStore
+    @State private var selected: TossDevice?
+    @State private var code = ""
+    @State private var message = ""
+    @State private var forgetTarget: TossDevice?
+
+    var body: some View {
+        List {
+            Section(header: Text("Mac receivers")) {
+                if store.pairedDevices.isEmpty { Text("No receivers found. Start the Mac receiver and search again.") }
+                ForEach(store.pairedDevices) { device in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(device.name).font(.headline)
+                        Text("\(device.host):\(device.port)").font(.caption).foregroundColor(.secondary)
+                        Text(device.isPaired ? "Saved pairing" : "Not paired").font(.caption)
+                        Text(store.reachableDeviceIDs.contains(device.id) ? "Discovered on network" : "Not currently discovered").font(.caption).foregroundColor(.secondary)
+                        Button(device.isPaired ? "Re-pair" : "Pair") { code = ""; message = ""; selected = device }
+                            .disabled(store.pairingInProgress)
+                        if device.isPaired {
+                            Button("Forget receiver", role: .destructive) { forgetTarget = device }
+                                .disabled(store.isTransferInProgress || store.pairingInProgress)
+                        }
+                    }.padding(.vertical, 4)
+                }
+                Button("Search again") { store.startDiscovery() }
+            }
+            Section { Text("Discovery is not trust. Verify the code on your Mac. Forgetting removes this phone's saved code and pending transfers to that endpoint; an already sent request cannot be recalled. Restart the receiver to rotate its code for all phones.").font(.caption) }
+        }
+        .navigationTitle("Devices")
+        .onAppear { store.startDiscovery() }
+        .sheet(item: $selected) { device in
+            NavigationView {
+                Form {
+                    Text(device.name)
+                    SecureField("Receiver pairing code", text: $code).autocapitalization(.none).disableAutocorrection(true)
+                    Button(store.pairingInProgress ? "Pairing…" : "Verify and pair") {
+                        Task {
+                            do {
+                                try await store.pairDevice(device, code: code.trimmingCharacters(in: .whitespacesAndNewlines))
+                                code = ""; selected = nil
+                            } catch { message = error.localizedDescription }
+                        }
+                    }.disabled(code.isEmpty || store.pairingInProgress)
+                    if !message.isEmpty { Text(message).foregroundColor(.red).font(.caption) }
+                }.navigationTitle("Pair receiver")
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { code = ""; selected = nil }.disabled(store.pairingInProgress) } }
+            }.interactiveDismissDisabled(store.pairingInProgress)
+        }
+        .confirmationDialog("Forget this receiver?", isPresented: Binding(get: { forgetTarget != nil }, set: { if !$0 { forgetTarget = nil } })) {
+            Button("Forget receiver and queued sends", role: .destructive) {
+                if let device = forgetTarget { store.forgetDevice(device) }
+                forgetTarget = nil
+            }
+        } message: { Text("Saved trust and pending transfers to this receiver will be removed. Delivered handoffs remain in history.") }
+    }
+}
+
 // MARK: - Settings View
 public struct SettingsView: View {
     @EnvironmentObject var store: TossStore
@@ -826,6 +908,9 @@ public struct SettingsView: View {
                     Text(store.modelSettingsMessage).font(.caption).foregroundColor(.secondary)
                 }
 
+                Section(header: Text("Devices")) {
+                    NavigationLink(destination: TossDevicesView()) { Label("Manage receivers", systemImage: "laptopcomputer") }
+                }
                 Section(header: Text("Privacy & Security")) {
                     Text("Dictation prefers on-device speech recognition; Apple may process audio when local recognition is unavailable. TOSS does not save audio files. When you create a handoff with a remote model, your notes and context are sent to that selected provider. Offline formatting sends no notes to a model. API keys are stored in the device Keychain.")
                         .font(.caption)

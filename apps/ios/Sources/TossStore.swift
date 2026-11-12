@@ -11,6 +11,53 @@ import TossProtocol
 public final class TossStore: ObservableObject {
     @Published public var handoffs: [TossHandoff] = []
     @Published public var pairedDevices: [TossDevice] = []
+    @Published public private(set) var reachableDeviceIDs: Set<String> = []
+    @Published public private(set) var pairingInProgress = false
+    private let deviceCredentials = TossQueueCredentialStore.keychain(namespace: "trusted-devices-v1")
+
+    private func credentialID(_ device: TossDevice) -> String {
+        TossSecurityUtils.sha256Hex(of: device.id + "|" + device.host.lowercased() + "|" + String(device.port))
+    }
+
+    public func savedPairingCode(for device: TossDevice) -> String {
+        guard device.isPaired else { return "" }
+        return deviceCredentials.read(credentialID(device)) ?? ""
+    }
+
+    public func pairDevice(_ device: TossDevice, code: String) async throws {
+        guard !pairingInProgress else { throw TossClientError.pairingRejected("Pairing already in progress") }
+        pairingInProgress = true
+        defer { pairingInProgress = false }
+        let client = TossClient()
+        _ = try await client.pair(with: device, pairingSecret: code)
+        try rememberTrust(device, code: code)
+    }
+
+    private func rememberTrust(_ device: TossDevice, code: String) throws {
+        guard deviceCredentials.write(credentialID(device), code) else {
+            throw TossClientError.pairingRejected("Could not save device trust in Keychain")
+        }
+        var trusted = device
+        trusted.isPaired = true
+        trusted.lastSeen = Date()
+        if let index = pairedDevices.firstIndex(where: { $0.id == device.id }) {
+            pairedDevices[index] = trusted
+        } else { pairedDevices.append(trusted) }
+        reachableDeviceIDs.insert(device.id)
+        persistToDisk()
+    }
+
+    public func forgetDevice(_ device: TossDevice) {
+        guard !isTransferInProgress, !pairingInProgress else { return }
+        deviceCredentials.remove(credentialID(device))
+        queue.forgetReceiver(device)
+        if reachableDeviceIDs.contains(device.id), let index = pairedDevices.firstIndex(where: { $0.id == device.id }) {
+            pairedDevices[index].isPaired = false
+        } else {
+            pairedDevices.removeAll { $0.id == device.id }
+        }
+        persistToDisk()
+    }
     @Published public var currentHandoff: TossHandoff?
     @Published public var activeTransferState: TransferState? = nil
     @Published public var lastReceipt: TransferAck? = nil
@@ -52,7 +99,8 @@ public final class TossStore: ObservableObject {
     public init() {
         loadFromDisk()
         selectModelKind(TossModelKind(rawValue: UserDefaults.standard.string(forKey: "toss.model.kind") ?? "") ?? .offline)
-        if pairedDevices.isEmpty {
+        #if targetEnvironment(simulator)
+        if !pairedDevices.contains(where: { $0.id == "local-mac" }) {
             pairedDevices.append(
                 TossDevice(
                     id: "local-mac",
@@ -60,10 +108,11 @@ public final class TossStore: ObservableObject {
                     platform: "macOS",
                     host: "127.0.0.1",
                     port: 7443,
-                    isPaired: true
+                    isPaired: false
                 )
             )
         }
+        #endif
         setupDiscovery()
         queue.triggerQueueProcessing()
     }
@@ -82,17 +131,29 @@ public final class TossStore: ObservableObject {
         discoveryService.onDeviceFound = { [weak self] device in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                if let index = self.pairedDevices.firstIndex(where: { $0.id == device.id || $0.name == device.name }) {
-                    self.pairedDevices[index] = device
+                var found = device
+                // Bonjour is discovery only, never proof of trust. Only reuse a
+                // credential for the identical previously authenticated endpoint.
+                if let existing = self.pairedDevices.first(where: { $0.id == device.id && $0.host == device.host && $0.port == device.port }),
+                   existing.isPaired, !self.savedPairingCode(for: existing).isEmpty {
+                    found.isPaired = true
+                }
+                self.reachableDeviceIDs.insert(found.id)
+                if let index = self.pairedDevices.firstIndex(where: { $0.id == found.id }) {
+                    self.pairedDevices[index] = found
                 } else {
-                    self.pairedDevices.append(device)
+                    self.pairedDevices.append(found)
                 }
                 self.persistToDisk()
             }
         }
         discoveryService.onDeviceLost = { [weak self] deviceName in
             DispatchQueue.main.async {
-                self?.pairedDevices.removeAll(where: { $0.name == deviceName && $0.id != "local-mac" })
+                guard let self = self else { return }
+                for device in self.pairedDevices where device.name == deviceName {
+                    self.reachableDeviceIDs.remove(device.id)
+                }
+                self.pairedDevices.removeAll { $0.name == deviceName && !$0.isPaired && $0.id != "local-mac" }
             }
         }
     }
@@ -148,6 +209,9 @@ public final class TossStore: ObservableObject {
 
         do {
             let token = try await client.pair(with: device, pairingSecret: pairingSecret)
+            // Pairing has been authenticated, but a Keychain write failure
+            // must not prevent this explicitly approved one-time transfer.
+            try? rememberTrust(device, code: pairingSecret)
             activeTransferState = .sending
             let ack = try await client.sendHandoff(handoff, to: device, authToken: token)
             guard ack.accepted, ack.handoffId == handoff.handoffId,
@@ -158,7 +222,11 @@ public final class TossStore: ObservableObject {
             activeTransferState = .received
             return ack
         } catch {
-            print("[TOSS Store] Direct transfer failed (\(error.localizedDescription)). Queuing for auto-retry...")
+            if let clientError = error as? TossClientError, case .pairingRejected = clientError {
+                activeTransferState = .failed(clientError.localizedDescription)
+                throw clientError
+            }
+            print("[TOSS Store] Direct transfer failed; queuing for auto-retry.")
             let queued = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: pairingSecret)
             if case .failed(let reason) = queued.status {
                 activeTransferState = .failed(reason)
@@ -173,7 +241,7 @@ public final class TossStore: ObservableObject {
         if let data = try? JSONEncoder().encode(revisionSnapshots) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
-        if let data = try? JSONEncoder().encode(pairedDevices) {
+        if let data = try? JSONEncoder().encode(pairedDevices.filter { $0.isPaired && $0.id != "local-mac" }) {
             UserDefaults.standard.set(data, forKey: devicesKey)
         }
     }
@@ -186,7 +254,7 @@ public final class TossStore: ObservableObject {
         }
         if let data = UserDefaults.standard.data(forKey: devicesKey),
            let loaded = try? JSONDecoder().decode([TossDevice].self, from: data) {
-            self.pairedDevices = loaded
+            self.pairedDevices = loaded.filter { $0.id != "local-mac" && $0.isPaired && deviceCredentials.read(credentialID($0)) != nil }
         }
     }
 }

@@ -10,3 +10,6 @@ Queue credential storage: separate per-transfer Keychain entries (device-only, u
 
 ## 0.1.2 secure transport continuation
 Base 22630124: 0.1.1 dark/light CI and developer packages succeeded. Implemented encrypted v2 pair and transfer routes, request-bound encrypted replies, replay/freshness checks, randomized LAN pairing codes, and client validation. The existing receiver, file manifest, revision and queue behavior are preserved. Added crypto and live receiver rejection tests. New CI must pass before download. The remaining gates are device validation, key lifecycle/revocation, independent security review, signed distribution and the original MVP plain-text export requirement. No main merge.
+
+## 0.1.3 remaining MVP features
+Added three-format iPhone export and receiver-generated text output with receipt migration; device management authenticates explicit pairing, stores codes separately in device-only Keychain, keeps discovery distinct from saved trust, allows forgetting a receiver and dropping pending queue entries, and supports failed transfer re-keying. The Mac launcher still rotates codes on restart; re-pair with the new code. Local forgetting cannot recall a request already sent or revoke another device's copy of the shared code. Physical-device verification and signed distribution remain release gates. CI pending.

@@ -1,4 +1,4 @@
-# TOSS 0.1.2 — developer test packages
+# TOSS 0.1.3 — developer test packages
 
 These are pre-release developer artifacts, not a production release. Download the successful **TOSS developer release packages** workflow artifact from GitHub Actions and extract its ZIPs. Verify checksums with `shasum -a 256 -c SHA256SUMS.txt`.
 
@@ -27,3 +27,6 @@ Dark is the default. Select Dark, Light or System under iPhone Settings > Appear
 
 ## Secure developer transfers
 Version 0.1.2 requires matching new receiver and iPhone builds. Network payloads and acknowledgments use authenticated encryption; discovery and HTTP routing metadata remain visible. The launcher rotates the private pairing code on each restart. For queued transfers from older releases or an earlier receiver run, re-send with the new code. Do not expose port 7443 publicly.
+
+## Export and receiver management
+Review > export saves Markdown, JSON or plain text via the system Files picker. New transfers produce handoff.md, handoff.json and handoff.txt; existing matching receipts gain text output on re-send without changing receipt ID. Settings > Devices manages verified saved pairing codes and forgets a receiver. Queue > Retry with new code recovers a failed transfer after a receiver restart. Pairing codes are stored in the phone's Keychain. Use the new receiver and iPhone builds together.
