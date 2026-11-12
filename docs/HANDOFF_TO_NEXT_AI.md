@@ -2,7 +2,7 @@
 **Version:** 1.0.0 (Phase 1 Complete)  
 **Author:** Google Antigravity  
 **Date:** 2026-11-11  
-**Target Repository:** `/Users/abcd/.gemini/antigravity/scratch/toss_handoff`  
+**Target Repository:** `https://github.com/dooleydarko/TOSS` (`/Users/abcd/.gemini/antigravity/scratch/toss_handoff`)  
 **Current Branch:** `main`  
 **Commit Hash:** `37cc20d` (clean `main` HEAD)
 
