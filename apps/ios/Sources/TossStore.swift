@@ -158,7 +158,11 @@ public final class TossStore: ObservableObject {
             return ack
         } catch {
             print("[TOSS Store] Direct transfer failed (\(error.localizedDescription)). Queuing for auto-retry...")
-            _ = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: pairingSecret)
+            let queued = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: pairingSecret)
+            if case .failed(let reason) = queued.status {
+                activeTransferState = .failed(reason)
+                throw TossClientError.transferFailed(reason)
+            }
             activeTransferState = .queued
             throw error
         }

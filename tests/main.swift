@@ -203,7 +203,10 @@ testCase("Offline Queue Enqueue and Tracking") {
     let suite = "toss.queue.test.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
-    let queue = TossTransferQueue(defaults: defaults, send: { _ in "test-receipt" })
+    var secrets: [String: String] = [:]
+    let credentials = TossQueueCredentialStore(read: { secrets[$0] },
+        write: { secrets[$0] = $1; return true }, remove: { secrets.removeValue(forKey: $0) })
+    let queue = TossTransferQueue(defaults: defaults, credentials: credentials, send: { _ in "test-receipt" })
     let handoff = TossHandoff(
         title: "Queued Offline Handoff",
         destination: .gpt,
@@ -217,8 +220,27 @@ testCase("Offline Queue Enqueue and Tracking") {
     assert(queue.items.contains(where: { $0.id == item.id }), "Queue must contain enqueued item")
     let duplicate = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
     assert(duplicate.id == item.id && queue.items.count == 1, "Duplicate pending transfers must be coalesced")
-    let restored = TossTransferQueue(defaults: defaults)
+    let raw = defaults.data(forKey: "toss_queued_transfers")!
+    let saved = try! JSONDecoder().decode([QueuedTransfer].self, from: raw)
+    assert(saved.first?.pairingSecret == "", "Pairing credential must not be in preferences")
+    let restored = TossTransferQueue(defaults: defaults, credentials: credentials)
     assert(restored.items.first?.id == item.id, "Pending transfer must survive reload")
+    assert(restored.items.first?.pairingSecret == "secret", "Credential must restore from secure storage")
+    // Simulate a legacy queue with an embedded secret and verify migration.
+    defaults.set(try! JSONEncoder().encode([item]), forKey: "toss_queued_transfers")
+    secrets.removeAll()
+    let migrated = TossTransferQueue(defaults: defaults, credentials: credentials)
+    assert(migrated.items.first?.pairingSecret == "secret")
+    assert(secrets[item.id] == "secret")
+    let migratedData = defaults.data(forKey: "toss_queued_transfers")!
+    assert(try! JSONDecoder().decode([QueuedTransfer].self, from: migratedData).first?.pairingSecret == "")
+    let unavailable = TossQueueCredentialStore(read: { _ in nil }, write: { _, _ in false }, remove: { _ in })
+    let blocked = TossTransferQueue(defaults: defaults, queueKey: "blocked", credentials: unavailable, send: { _ in
+        assertionFailure("A transfer without secure credentials must not send")
+        return "unexpected"
+    })
+    let failed = blocked.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
+    assert(failed.status.isTerminal, "Credential storage failure must fail closed")
 }
 
 testCase("Queue retries and updates the correct transfer after insertion") {
@@ -228,7 +250,11 @@ testCase("Queue retries and updates the correct transfer after insertion") {
     let device = TossDevice(id: "queue-test", name: "Test Mac", host: "127.0.0.1", port: 7443)
     let first = TossHandoff(title: "First", objective: "Retry first", context: "Test", source: TossSource(type: .text))
     let second = TossHandoff(title: "Second", objective: "Send second", context: "Test", source: TossSource(type: .text))
-    let queue = TossTransferQueue(defaults: defaults, retryBase: 0.02, send: { item in
+    var secrets: [String: String] = [:]
+    let credentials = TossQueueCredentialStore(read: { secrets[$0] },
+        write: { secrets[$0] = $1; return true }, remove: { secrets.removeValue(forKey: $0) })
+    let queue = TossTransferQueue(defaults: defaults, retryBase: 0.02, credentials: credentials, send: { item in
+        assert(item.pairingSecret == "test", "Retry must receive the correct secure credential")
         try await Task.sleep(nanoseconds: 80_000_000)
         if item.handoff.handoffId == first.handoffId && item.attempts == 1 {
             throw TossClientError.networkError("Injected failure")
@@ -249,8 +275,9 @@ testCase("Queue retries and updates the correct transfer after insertion") {
     assert(queue.items.first(where: { $0.id == firstItem.id })?.status == .completed(receiptId: "receipt-" + first.handoffId))
     assert(queue.items.first(where: { $0.id == firstItem.id })?.attempts == 2)
     assert(queue.items.first(where: { $0.id == secondItem.id })?.status == .completed(receiptId: "receipt-" + second.handoffId))
-    let restored = TossTransferQueue(defaults: defaults)
+    let restored = TossTransferQueue(defaults: defaults, credentials: credentials)
     assert(restored.items == queue.items, "Final receipts must persist")
+    assert(secrets.isEmpty, "Completed transfer credentials must be removed")
 }
 
 testCase("Bonjour Discovery Service Lifecycle") {

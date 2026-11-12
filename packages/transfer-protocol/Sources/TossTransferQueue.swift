@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Security
 #if canImport(TossSchema)
 import TossSchema
 #endif
@@ -48,10 +49,55 @@ public struct QueuedTransfer: Codable, Identifiable, Equatable {
     }
 }
 
+/// Queue credentials are stored separately from the Codable queue snapshot.
+public struct TossQueueCredentialStore {
+    public let read: (String) -> String?
+    public let write: (String, String) -> Bool
+    public let remove: (String) -> Void
+
+    public init(read: @escaping (String) -> String?, write: @escaping (String, String) -> Bool,
+                remove: @escaping (String) -> Void) {
+        self.read = read
+        self.write = write
+        self.remove = remove
+    }
+
+    public static func keychain(namespace: String) -> Self {
+        let service = "com.dooleydarko.toss.queue." + namespace
+        func query(_ id: String) -> [String: Any] {
+            [kSecClass as String: kSecClassGenericPassword,
+             kSecAttrService as String: service, kSecAttrAccount as String: id]
+        }
+        return Self(read: { id in
+            var request = query(id)
+            request[kSecReturnData as String] = true
+            request[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(request as CFDictionary, &result) == errSecSuccess,
+                  let data = result as? Data else { return nil }
+            return String(data: data, encoding: .utf8)
+        }, write: { id, secret in
+            let request = query(id)
+            let data = Data(secret.utf8)
+            let status = SecItemUpdate(request as CFDictionary,
+                                       [kSecValueData as String: data] as CFDictionary)
+            if status == errSecSuccess { return true }
+            guard status == errSecItemNotFound else { return false }
+            var add = request
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        }, remove: { id in
+            _ = SecItemDelete(query(id) as CFDictionary)
+        })
+    }
+}
+
 public final class TossTransferQueue: ObservableObject {
     @Published public private(set) var items: [QueuedTransfer] = []
     private let defaults: UserDefaults
     private let queueKey: String
+    private let credentials: TossQueueCredentialStore
     private let retryBase: TimeInterval
     private let send: (QueuedTransfer) async throws -> String
     private var isProcessing = false
@@ -62,9 +108,11 @@ public final class TossTransferQueue: ObservableObject {
     public init(defaults: UserDefaults = .standard,
                 queueKey: String = "toss_queued_transfers",
                 retryBase: TimeInterval = 2,
+                credentials: TossQueueCredentialStore? = nil,
                 send: ((QueuedTransfer) async throws -> String)? = nil) {
         self.defaults = defaults
         self.queueKey = queueKey
+        self.credentials = credentials ?? .keychain(namespace: queueKey)
         self.retryBase = max(0.01, retryBase)
         self.send = send ?? { item in
             let client = TossClient()
@@ -74,7 +122,23 @@ public final class TossTransferQueue: ObservableObject {
         }
         if let data = defaults.data(forKey: queueKey),
            let loaded = try? JSONDecoder().decode([QueuedTransfer].self, from: data) {
-            items = loaded
+            // Migrate legacy plaintext snapshots before writing a redacted copy.
+            // A failed migration is visible and never causes an unauthenticated send.
+            items = loaded.map { item in
+                var restored = item
+                if case .completed = restored.status {
+                    self.credentials.remove(restored.id)
+                    restored.pairingSecret = ""
+                } else if !restored.pairingSecret.isEmpty {
+                    if !self.credentials.write(restored.id, restored.pairingSecret) {
+                        restored.status = .failed(reason: "Could not migrate pairing credential securely. Retry or send again.")
+                    }
+                } else {
+                    restored.pairingSecret = self.credentials.read(restored.id) ?? ""
+                }
+                return restored
+            }
+            persistToDisk()
         }
     }
 
@@ -88,7 +152,10 @@ public final class TossTransferQueue: ObservableObject {
             triggerQueueProcessing()
             return existing
         }
-        let item = QueuedTransfer(handoff: handoff, targetDevice: targetDevice, pairingSecret: pairingSecret)
+        var item = QueuedTransfer(handoff: handoff, targetDevice: targetDevice, pairingSecret: pairingSecret)
+        if pairingSecret.isEmpty || !credentials.write(item.id, pairingSecret) {
+            item.status = .failed(reason: "Pairing credential could not be saved securely. Retry or send again.")
+        }
         items.insert(item, at: 0)
         persistToDisk()
         triggerQueueProcessing()
@@ -149,6 +216,13 @@ public final class TossTransferQueue: ObservableObject {
                 updateItem(attempt)
                 continue
             }
+            let secret = attempt.pairingSecret.isEmpty ? credentials.read(attempt.id) ?? "" : attempt.pairingSecret
+            guard !secret.isEmpty, credentials.write(attempt.id, secret) else {
+                attempt.status = .failed(reason: "Pairing credential unavailable. Unlock the device and retry or send again.")
+                updateItem(attempt)
+                continue
+            }
+            attempt.pairingSecret = secret
             attempt.attempts += 1
             attempt.lastAttemptAt = Date()
             updateItem(attempt)
@@ -156,6 +230,8 @@ public final class TossTransferQueue: ObservableObject {
                 let receipt = try await send(attempt)
                 guard !receipt.isEmpty else { throw TossClientError.transferFailed("Missing receipt") }
                 attempt.status = .completed(receiptId: receipt)
+                credentials.remove(attempt.id)
+                attempt.pairingSecret = ""
             } catch {
                 attempt.lastAttemptAt = Date()
                 if attempt.attempts >= attempt.maxAttempts {
@@ -175,7 +251,12 @@ public final class TossTransferQueue: ObservableObject {
     }
 
     private func persistToDisk() {
-        if let data = try? JSONEncoder().encode(items) {
+        let redacted = items.map { item -> QueuedTransfer in
+            var snapshot = item
+            snapshot.pairingSecret = ""
+            return snapshot
+        }
+        if let data = try? JSONEncoder().encode(redacted) {
             defaults.set(data, forKey: queueKey)
         }
     }
