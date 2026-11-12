@@ -18,9 +18,10 @@
 - [x] Polished SwiftUI card swipe physics with spring mechanics, dynamic card tilt, shadow scaling, and snap-back curves.
 - [x] Added `QueueView` to the iOS client for managing offline and pending handoffs.
 - [x] Authored `project.yml` XcodeGen specification with iOS/macOS bundle entitlements.
-- [x] Expanded automated test suite from 8 to 10 verified test cases (10/10 passing).
-- [ ] Next: SQLite / SwiftData storage schema for deep revision history.
-- [ ] Next: Audio waveform visualization and live Speech framework integration on iOS.
+- [x] Added `TossGitContext` for automatic repository metadata, branch, and commit hash extraction.
+- [x] Added `TossHistoryEngine` with incremental revision tracking, diff computation, and full-text keyword search.
+- [x] Expanded automated test suite from 8 to 12 verified test cases (12/12 passing).
+- [ ] Next: Live Speech framework integration and waveform visualization for iOS dictation.
 
 ---
 

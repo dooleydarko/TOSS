@@ -52,6 +52,43 @@ testCase("Handoff Creation and Validation") {
     assert(handoff.revision == 1, "Revision must be 1")
 }
 
+testCase("Git Context Extraction") {
+    let repo = TossGitContext.currentRepositoryContext()
+    assert(repo.branch == "main", "Branch must be main")
+    assert(repo.commit != nil, "Commit hash must not be nil")
+    assert(repo.url?.contains("dooleydarko/TOSS") == true, "Remote URL must point to TOSS")
+}
+
+testCase("History Engine Revisions and Diffing") {
+    let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("history_test_\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    let engine = TossHistoryEngine(storageURL: tempURL)
+
+    let base = TossHandoff(
+        title: "Searchable Engine Project",
+        destination: .antigravity,
+        objective: "Build fast revision engine",
+        context: "Initial revision",
+        requirements: ["Req 1"],
+        completed: [],
+        nextActions: ["Action 1"],
+        source: TossSource(type: .text)
+    )
+    engine.recordHandoff(base)
+
+    let rev2 = engine.createNextRevision(from: base, newRequirements: ["Req 2"], completedActions: ["Action 1"])
+    assert(rev2.revision == 2, "Revision must increment to 2")
+    assert(rev2.requirements.contains("Req 2"), "New requirement must be present")
+    assert(rev2.completed.contains("Action 1"), "Action 1 must be marked completed")
+
+    let diff = HandoffDiff(previous: base, current: rev2)
+    assert(diff.addedRequirements == ["Req 2"], "Diff must report added requirement")
+    assert(diff.newlyCompletedActions == ["Action 1"], "Diff must report newly completed action")
+
+    let searchResults = engine.search(query: "Searchable")
+    assert(searchResults.count == 1, "Search must find handoff by keyword")
+}
+
 testCase("Empty Title Fails Validation") {
     let invalid = TossHandoff(
         title: "   ",

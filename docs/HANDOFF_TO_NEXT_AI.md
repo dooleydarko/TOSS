@@ -106,6 +106,8 @@ swiftc \
 | Test Suite | Test Case | Status | Verified Output / Behavior |
 |---|---|:---:|---|
 | TossSchema | Handoff Creation & Validation | PASS | Schema v1.0.0, required fields enforced |
+| TossSchema | Git Context Extraction | PASS | Auto-detects main branch, commit SHA, and remote URL |
+| TossSchema | History Engine Revisions & Diffing | PASS | Revision incrementing, diff detection, keyword search |
 | TossSchema | Empty Title Fails Validation | PASS | Missing title throws TossValidationError |
 | TossSchema | JSON Serialization Round-trip | PASS | Exact property match after encode/decode |
 | TossSchema | Markdown Serialization | PASS | Sections, bullets, and metadata formatted |
@@ -116,7 +118,7 @@ swiftc \
 | AIProvider | Offline Rule-Based AI Fallback | PASS | Unstructured text converted to requirements & actions |
 | End-to-End | Full Pairing and Transfer Loop | PASS | Device paired, payload sent, SHA-256 checked, `handoff.json` & `handoff.md` written to disk, ACK verified |
 
-**Total Tests:** 10/10 Passed.
+**Total Tests:** 12/12 Passed.
 
 **Note on Untested Areas:**
 - Physical iPhone-to-physical-Mac Wi-Fi latency and live Apple Speech Recognition framework require a connected physical iOS device with microphone entitlement.
