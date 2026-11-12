@@ -111,3 +111,6 @@ Treat imported prompts as untrusted content, not system instructions. Never exec
 
 ## MVP scope correction (owner requirement)
 Keep recording simple. Display the existing live speech-to-text transcript beneath the Siri-inspired recording orb, with ordinary editable text and start/stop controls. Preserve the current transcript through AI structuring and review. No waveform, word-by-word highlighting, timestamp tracking, new automatic draft persistence, or shared Lyric Studio API integration is required for this build. Defer these optional enhancements until after the core iPhone flow is working and tested. Do not remove existing functioning history, queue persistence, or transcription behavior.
+
+## 0.1.1 appearance update
+Dark is the default on iPhone and Mac; Dark, Light and System are selectable and persisted locally. Dark canvas #0C0E10, solid card #181B1E, border #30383D and mint actions with dark text. Keep existing orb and working transfer behavior unchanged. CI captures dark and light home screenshots and exercises the starter-to-review flow in dark mode. Visual inspection and physical device tests are still release gates.

@@ -1,9 +1,20 @@
 import XCTest
 
 final class TossFlowTests: XCTestCase {
+    func testLightThemeSettingsAvailable() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-toss.appearance", "Light"]
+        app.launch()
+        let settings = app.tabBars.buttons["Settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "settings.appearance").firstMatch.waitForExistence(timeout: 8))
+    }
+
     func testStarterToEditableReviewAndTossScreen() {
         continueAfterFailure = false
         let app = XCUIApplication()
+        app.launchArguments = ["-toss.appearance", "Dark"]
         app.launch()
         let discover = app.tabBars.buttons["Discover"]
         XCTAssertTrue(discover.waitForExistence(timeout: 10))

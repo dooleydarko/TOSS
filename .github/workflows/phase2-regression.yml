@@ -39,9 +39,14 @@ jobs:
           xcrun simctl boot "$DEVICE" || true
           xcrun simctl bootstatus "$DEVICE" -b
           xcrun simctl install "$DEVICE" "$RUNNER_TEMP/toss-build/Build/Products/Debug-iphonesimulator/TOSS-iOS.app"
-          xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios
+          xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios -toss.appearance Dark
           sleep 4
           xcrun simctl io "$DEVICE" screenshot bin/toss-home.png
+          xcrun simctl terminate "$DEVICE" com.dooleydarko.toss.ios
+          xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios -toss.appearance Light
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot bin/toss-home-light.png
+          xcrun simctl terminate "$DEVICE" com.dooleydarko.toss.ios
       - name: Exercise the iPhone starter, review and Toss UI
         if: github.ref_name == 'ui-foundation'
         shell: bash
@@ -56,4 +61,5 @@ jobs:
           path: |
             bin/regression.log
             bin/toss-home.png
+            bin/toss-home-light.png
             bin/ui-test.log
