@@ -70,7 +70,7 @@ public final class TossStore: ObservableObject {
         }
     }
 
-    public func createHandoffFromText(rawText: String, context: String = "") async throws -> TossHandoff {
+    public func createHandoffFromText(rawText: String, context: String = "", sourceType: TossSource.SourceType = .text) async throws -> TossHandoff {
         let provider: AIProvider
         if !geminiApiKey.isEmpty {
             provider = GeminiAIProvider(apiKey: geminiApiKey, model: selectedModel)
@@ -80,6 +80,7 @@ public final class TossStore: ObservableObject {
 
         var structured = try await provider.structure(input: rawText, context: context)
         structured.destination = preferredDestination
+        structured.source = TossSource(type: sourceType, transcriptAvailable: sourceType == .voice, rawInput: rawText)
         self.currentHandoff = structured
         self.saveHandoff(structured)
         return structured
