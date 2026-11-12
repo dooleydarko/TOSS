@@ -1,4 +1,4 @@
-# TOSS — shared UI foundation (v0.4)
+# TOSS — shared UI foundation (v0.5)
 Status: proposed design baseline; not yet applied to application screens.
 
 Primary reference approved by the owner: [Ronas IT — Self-care Mobile App Design Concept](https://dribbble.com/shots/23278774-Self-care-Mobile-App-Design-Concept).
@@ -38,7 +38,7 @@ Use system semantic colors for success, warning, error and dark mode; validate c
 - Motion: restrained feedback; the spring-based Toss gesture remains the signature interaction.
 
 ## TOSS screen mapping
-- Capture/home: adapt the reference's greeting/header area into an entry point for previous handoffs, with access to search, open and edit existing handoffs. Adapt its “How you feel today” tracking area into the recording area with a single Apple-inspired circular recording control and editable live transcript (no waveform). Preserve contextual project input and structure CTA.
+- Capture/home: adapt the reference's greeting/header area into an entry point for previous handoffs, with access to search, open and edit existing handoffs. Adapt its “How you feel today” tracking area into the recording area with a single Siri-inspired animated orb recording control and editable live transcript (no waveform). Preserve contextual project input and structure CTA.
 - Signature ball: adapt the reference's ball into a tangible handoff object. After recording, structuring and review, the user tosses the ball upward to send the completed handoff to the paired desktop. Preserve the accessible send button and transfer acknowledgment; the ball is not a substitute for delivery confirmation.
 - Review: clear overview, existing Markdown/JSON views, primary send CTA.
 - Toss: destination and transfer status, prominent swipeable ball, explicit accessible send button.
@@ -56,7 +56,7 @@ Use system semantic colors for success, warning, error and dark mode; validate c
 For other web projects, port the semantic tokens and component states, not the iOS code. Add a component gallery showing normal, pressed, focused, disabled, loading, empty and error variants. Each project may set its own accent and imagery while sharing the rules above.
 
 ## Recording-to-handoff interaction (owner clarification)
-- The home tracking area is the actual voice capture workspace: a single solid circular microphone/stop control and visible, continuously updating speech-to-text directly underneath. No waveform, audio bars, or oscillating trace. Idle shows a mic icon; recording shows a stop icon and elapsed time, with a restrained state ring; processing shows a progress ring. Respect reduced motion; provide accessible labels and state announcements.
+- The home tracking area is the actual voice capture workspace: a single Siri-inspired animated circular orb with an accessible microphone/stop control and visible, continuously updating speech-to-text directly underneath. No waveform, audio bars, or oscillating trace. Idle shows a quiet colorful orb; recording animates internal color and a subtle breathing scale with an obvious stop affordance and elapsed time; processing has its own animation and status label. Keep surrounding cards opaque and flat. After review the orb becomes the ready-to-toss ball; do not send until an explicit swipe or Send action. Respect reduced motion; provide accessible labels and state announcements.
 - Preserve the raw editable transcript separately from the structured output; allow stop, correction and additional dictation before structuring.
 - A clearly labeled Create Handoff action sends the transcript to the configured AI structuring provider. The existing offline formatter is a fallback and must not be misrepresented as a live AI model. Show processing, errors and retry states, keeping the raw words intact.
 - The review area presents the AI-generated title, goals, requirements, constraints and next actions, with existing Markdown and JSON modes. Let the user inspect and edit before sending; continuing an existing handoff should retain revision history.
@@ -70,3 +70,19 @@ For other web projects, port the semantic tokens and component states, not the i
 - Provide user-entered credentials stored in Keychain, connection testing, selectable models, cost/tier disclosure where verified, and clear authentication/rate-limit/error states. Never log or embed secrets. Do not send transcripts to a different cloud provider without user consent. Keep raw text when any provider fails.
 - Keep the existing offline rule-based formatter available without a key; identify it as offline formatting, not a language model. Local model support is conditional on a reachable, compatible endpoint and device/server capacity.
 - Model integration is a separate functional workstream; UI-only changes must preserve existing working Gemini and offline behavior. Validate adapters and failure paths before release.
+
+## Mandatory component reuse and visual fidelity (owner requirement)
+Applies to every coding agent (GPT, Claude, Antigravity, or others). For each approved reusable component, inspect the actual source and demo; if the license permits reuse, import the compatible source or pin a compatible dependency rather than rebuilding an approximate component from a screenshot. Aim for 1:1 visual and interaction fidelity to the approved component, including geometry, colors, typography, spacing, motion timing, states and gestures. Do not silently restyle it. Only change the integration boundary to bind it to TOSS data, navigation and accessibility. Any unavoidable platform, accessibility, license, or compatibility deviations must be documented and approved before accepting the component. The Dribbble composition is the visual direction, not a grant of rights to proprietary code/assets; implement the agreed layout with original branding and licensed components. No glass cards, no waveform. Do not copy Apple's proprietary Siri assets.
+
+### Verified public source candidates (not yet selected or imported)
+- https://github.com/mdo91/AI-Animation-Demo — MIT; native pulsing orb and AI state animations.
+- https://github.com/mikelikesdesign/SwiftUI-experiments — MIT; AI globe and blob examples.
+- https://github.com/SwiftfulThinking/SwiftfulUI — MIT; reusable native buttons, gestures, layouts and view modifiers.
+- https://github.com/Shubham0812/SwiftUI-Animations — Apache-2.0; reusable animations.
+- https://smoothui.dev/docs/components/siri-orb — web reference; native port requires checking license and reproducing the visual behavior; not a SwiftUI dependency.
+
+### Acceptance gates
+1. Record exact repository, source path, commit/tag, license and required notices. Verify individual asset rights and iOS 15 support before importing. No unapproved deployment-target increase.
+2. Save approved reference screenshots and recordings, capture matching simulator states at the same viewport and appearance settings, compare side by side and flag discrepancies. Test animation and actual touch behavior separately; a still screenshot is not enough.
+3. Keep an internal component gallery for all states and reuse the same component across screens. Do not claim 100% fidelity without visual verification; report differences explicitly.
+4. Preserve the real recording/transcript, model selection, handoff structuring, editing, queue and transfer behaviors. All visual changes must pass regression and iOS build gates before integration.
