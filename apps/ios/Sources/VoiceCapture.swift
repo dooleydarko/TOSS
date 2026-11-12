@@ -1,6 +1,7 @@
 import AVFoundation
 import Speech
 import SwiftUI
+import Combine
 
 /// One microphone tap feeds both speech recognition and live RMS metering.
 /// All UI state and lifecycle changes are isolated to the main actor.
@@ -32,7 +33,7 @@ final class VoiceCapture: ObservableObject {
         errorMessage = nil
         state = .authorizing
 
-        let microphoneAllowed = await withCheckedContinuation { continuation in
+        let microphoneAllowed: Bool = await withCheckedContinuation { continuation in
             AVAudioSession.sharedInstance().requestRecordPermission { allowed in
                 continuation.resume(returning: allowed)
             }
@@ -43,7 +44,7 @@ final class VoiceCapture: ObservableObject {
             return
         }
 
-        let speechStatus = await withCheckedContinuation { continuation in
+        let speechStatus: SFSpeechRecognizerAuthorizationStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status)
             }

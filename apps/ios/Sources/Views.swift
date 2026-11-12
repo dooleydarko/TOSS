@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Combine
 #if canImport(TossSchema)
 import TossSchema
 #endif

@@ -1,0 +1,34 @@
+name: TOSS Phase 2 regression
+on:
+  push:
+    branches: [phase2-gpt-refinements, main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run integrated suite
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p bin
+          swiftc packages/handoff-schema/Sources/*.swift packages/transfer-protocol/Sources/*.swift apps/macos-receiver/Sources/ReceiverServer.swift tests/main.swift -o bin/toss-test-runner
+          ./bin/toss-test-runner | tee bin/regression.log
+      - name: Build receiver
+        run: |
+          swiftc packages/handoff-schema/Sources/*.swift packages/transfer-protocol/Sources/*.swift apps/macos-receiver/Sources/*.swift -o bin/toss-receiver
+      - name: Generate iOS project and compile for simulator
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-log
+          path: bin/regression.log
