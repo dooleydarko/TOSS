@@ -221,6 +221,24 @@ testCase("Bonjour Discovery Service Lifecycle") {
     assert(true, "Bonjour service must start and stop cleanly")
 }
 
+testCase("Model request routing, response validation and original starter independence") {
+    let starter = TossStarter.library[0]
+    let first = try starter.handoff(customNotes: "Original user notes", destination: .gpt)
+    let second = try starter.handoff(customNotes: "Other notes", destination: .claude)
+    assert(first.handoffId != second.handoffId && first.projectId != second.projectId)
+    let provider = TossRemoteProvider(kind: .claude, model: "test-model", key: "test-key")
+    let request = try provider.makeRequest(input: "notes", context: "context")
+    assert(request.url?.host == "api.anthropic.com")
+    assert(request.value(forHTTPHeaderField: "x-api-key") == "test-key")
+    let json = String(decoding: try first.toJSONData(), as: UTF8.self)
+    let envelope = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": json]]]])
+    let decoded = try TossRemoteProvider.decode(envelope, kind: .openAI, originalInput: "verbatim")
+    assert(decoded.source.rawInput == "verbatim")
+    let insecure = TossRemoteProvider(kind: .compatible, model: "local", key: "", endpoint: "http://example.com")
+    do { _ = try insecure.makeRequest(input: "x", context: ""); assertionFailure("HTTP endpoint must be rejected") }
+    catch { }
+}
+
 // 3. AI Provider Offline Fallback
 print("\n--- AI Provider Tests ---")
 let runAsyncTests = DispatchSemaphore(value: 0)

@@ -38,3 +38,16 @@ targets:
       - path: packages/transfer-protocol/Sources
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.dooleydarko.toss.receiver
+
+  TOSS-Desktop:
+    type: application
+    platform: macOS
+    deploymentTarget: "12.0"
+    sources:
+      - path: apps/macos-dashboard/Sources
+      - path: packages/handoff-schema/Sources
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.dooleydarko.toss.desktop
+      GENERATE_INFOPLIST_FILE: YES
+      ONLY_ACTIVE_ARCH: NO
+      ARCHS: "x86_64 arm64"

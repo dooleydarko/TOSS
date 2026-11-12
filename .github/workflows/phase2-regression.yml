@@ -27,6 +27,9 @@ jobs:
           brew install xcodegen
           xcodegen generate
           xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/toss-build" CODE_SIGNING_ALLOWED=NO build
+      - name: Build macOS desktop inbox for Intel and Apple Silicon
+        run: |
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-Desktop -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/toss-desktop" CODE_SIGNING_ALLOWED=NO build
       - name: Launch iPhone simulator and capture home screen
         if: github.ref_name == 'ui-foundation'
         shell: bash

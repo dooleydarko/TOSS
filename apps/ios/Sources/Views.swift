@@ -124,7 +124,7 @@ public struct CaptureView: View {
                             TextField("Repository, project or issue (optional)", text: $contextText)
                                 .textFieldStyle(.roundedBorder)
                                 .disabled(isProcessing)
-                            Label(store.geminiApiKey.isEmpty ? "Offline formatter" : "Configured model: \(store.selectedModel)",
+                            Label(store.modelLabel,
                                   systemImage: "cpu")
                                 .font(.caption).foregroundColor(.secondary)
                             Text("Change AI settings in the Settings tab.")
@@ -665,6 +665,7 @@ public struct HistoryView: View {
     public var body: some View {
         NavigationView {
             List(filteredHandoffs) { item in
+                NavigationLink(destination: HistoryReviewEntry(handoff: item)) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(item.title)
@@ -689,8 +690,23 @@ public struct HistoryView: View {
                     .foregroundColor(.gray)
                 }
                 .padding(.vertical, 4)
+                }
             }
+            .searchable(text: $searchText)
             .navigationTitle("Handoff History")
+        }
+    }
+}
+
+@MainActor
+private struct HistoryReviewEntry: View {
+    @EnvironmentObject var store: TossStore
+    let handoff: TossHandoff
+    var body: some View {
+        ReviewView().onAppear {
+            if !store.isTransferInProgress {
+                store.currentHandoff = store.handoffs.first(where: { $0.handoffId == handoff.handoffId }) ?? handoff
+            }
         }
     }
 }
@@ -711,16 +727,29 @@ public struct SettingsView: View {
                         }
                     }
 
-                    SecureField("Gemini API Key (Optional)", text: $store.geminiApiKey)
-                    TextField("Model", text: $store.selectedModel)
-
-                    Text("Without an API key, handoff structuring uses the built-in offline rule-based formatter.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Picker("Provider", selection: Binding(get: { store.modelKind }, set: { store.selectModelKind($0) })) {
+                        ForEach(TossModelKind.allCases) { kind in Text(kind.label).tag(kind) }
+                    }
+                    if store.modelKind != .offline {
+                        SecureField("API key", text: $store.modelKey)
+                            .textContentType(.password)
+                            .autocapitalization(.none)
+                        TextField("Exact API model ID", text: $store.selectedModel)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        if store.modelKind == .compatible {
+                            TextField("HTTPS chat completions URL", text: $store.modelEndpoint)
+                                .keyboardType(.URL).autocapitalization(.none)
+                        }
+                        Text("API access and quotas are separate from chat subscriptions. OpenRouter free models are rate limited.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                    Button("Save model settings") { store.saveModelSettings() }
+                    Text(store.modelSettingsMessage).font(.caption).foregroundColor(.secondary)
                 }
 
                 Section(header: Text("Privacy & Security")) {
-                    Text("Dictation prefers on-device speech recognition; Apple may process audio when local recognition is unavailable. TOSS does not save audio files. Project notes are sent to Gemini only when you configure an AI key and initiate structuring.")
+                    Text("Dictation prefers on-device speech recognition; Apple may process audio when local recognition is unavailable. TOSS does not save audio files. When you create a handoff with a remote model, your notes and context are sent to that selected provider. Offline formatting sends no notes to a model. API keys are stored in the device Keychain.")
                         .font(.caption)
                 }
             }
@@ -746,6 +775,8 @@ public struct TossAppView: View {
                 .tabItem {
                     Label("History", systemImage: "clock.fill")
                 }
+            DiscoverView()
+                .tabItem { Label("Discover", systemImage: "square.grid.2x2") }
             QueueView()
                 .tabItem {
                     Label("Queue", systemImage: "arrow.triangle.2.circlepath")

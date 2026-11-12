@@ -16,8 +16,31 @@ public final class TossStore: ObservableObject {
     @Published public var lastReceipt: TransferAck? = nil
     @Published public private(set) var isTransferInProgress = false
     private var revisionSnapshots: [TossHandoff] = []
-    @Published public var geminiApiKey: String = ""
-    @Published public var selectedModel: String = "gemini-1.5-flash"
+    @Published public var modelKind: TossModelKind = .offline
+    @Published public var modelKey = ""
+    @Published public var selectedModel = ""
+    @Published public var modelEndpoint = ""
+    @Published public private(set) var modelSettingsMessage = ""
+    public var modelLabel: String { modelKind == .offline ? modelKind.label : "\(modelKind.label): \(selectedModel)" }
+    public func selectModelKind(_ kind: TossModelKind) {
+        modelKind = kind
+        let defaults = UserDefaults.standard
+        modelKey = TossModelKeychain.read(kind)
+        selectedModel = defaults.string(forKey: "toss.model.\(kind.rawValue)") ?? kind.defaultModel
+        modelEndpoint = defaults.string(forKey: "toss.model.endpoint") ?? ""
+        modelSettingsMessage = ""
+    }
+    public func saveModelSettings() {
+        guard TossModelKeychain.write(modelKey, for: modelKind) else {
+            modelSettingsMessage = "Could not save key securely."
+            return
+        }
+        let defaults = UserDefaults.standard
+        defaults.set(modelKind.rawValue, forKey: "toss.model.kind")
+        defaults.set(selectedModel, forKey: "toss.model.\(modelKind.rawValue)")
+        defaults.set(modelEndpoint, forKey: "toss.model.endpoint")
+        modelSettingsMessage = "Saved on this device."
+    }
     @Published public var preferredDestination: TossDestination = .antigravity
     @Published public var isDiscoveryActive: Bool = false
     @Published public var queue = TossTransferQueue()
@@ -28,6 +51,7 @@ public final class TossStore: ObservableObject {
 
     public init() {
         loadFromDisk()
+        selectModelKind(TossModelKind(rawValue: UserDefaults.standard.string(forKey: "toss.model.kind") ?? "") ?? .offline)
         if pairedDevices.isEmpty {
             pairedDevices.append(
                 TossDevice(
@@ -74,11 +98,12 @@ public final class TossStore: ObservableObject {
 
     public func createHandoffFromText(rawText: String, context: String = "", sourceType: TossSource.SourceType = .text) async throws -> TossHandoff {
         let provider: AIProvider
-        if !geminiApiKey.isEmpty {
-            provider = GeminiAIProvider(apiKey: geminiApiKey, model: selectedModel)
-        } else {
-            provider = RuleBasedFallbackProvider()
+        switch modelKind {
+        case .offline: provider = RuleBasedFallbackProvider()
+        case .gemini: provider = GeminiAIProvider(apiKey: modelKey, model: selectedModel)
+        default: provider = TossRemoteProvider(kind: modelKind, model: selectedModel, key: modelKey, endpoint: modelEndpoint)
         }
+        guard provider.isConfigured else { throw TossValidationError.invalidField("Configure your chosen model in Settings, or select Offline.") }
 
         var structured = try await provider.structure(input: rawText, context: context)
         structured.destination = preferredDestination
