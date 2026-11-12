@@ -94,7 +94,9 @@ public final class TossStore: ObservableObject {
 
     private let discoveryService = TossDiscoveryService()
     private let storageKey = "toss_local_handoffs"
-    private let devicesKey = "toss_paired_devices"
+    // The legacy list persisted unauthenticated Bonjour discoveries. Do not
+    // treat that list as trusted or migrate its flags into this new store.
+    private let devicesKey = "toss_trusted_receivers_v1"
 
     public init() {
         loadFromDisk()
@@ -119,11 +121,14 @@ public final class TossStore: ObservableObject {
 
     public func startDiscovery() {
         isDiscoveryActive = true
+        reachableDeviceIDs.removeAll()
+        pairedDevices.removeAll { !$0.isPaired && $0.id != "local-mac" }
         discoveryService.startBrowsing()
     }
 
     public func stopDiscovery() {
         isDiscoveryActive = false
+        reachableDeviceIDs.removeAll()
         discoveryService.stopBrowsing()
     }
 
@@ -254,7 +259,7 @@ public final class TossStore: ObservableObject {
         }
         if let data = UserDefaults.standard.data(forKey: devicesKey),
            let loaded = try? JSONDecoder().decode([TossDevice].self, from: data) {
-            self.pairedDevices = loaded.filter { $0.id != "local-mac" && $0.isPaired && deviceCredentials.read(credentialID($0)) != nil }
+            self.pairedDevices = loaded.filter { $0.id != "local-mac" && $0.isPaired }
         }
     }
 }

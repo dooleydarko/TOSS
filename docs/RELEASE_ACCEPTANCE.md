@@ -24,3 +24,8 @@ Status: developer beta. Keep the working branch; never force push or overwrite l
 The developer LAN implementation encrypts request/receipt bodies with a shared random code. It is not TLS or forward secrecy; metadata remains visible. Local forgetting is not server-side individual-device revocation. A new code rotates access for all devices. Review the design with an independent security engineer before public release.
 
 Record each physical test as PASS/FAIL/BLOCKED with hardware, OS, build commit, reproduction and non-sensitive evidence. Do not mark a gate passed without evidence.
+
+## Optional local signing tooling
+After the release gates have passed, run `bash scripts/package-signed-mac.sh /path/to/TOSS-Mac-Developer.zip "Developer ID Application: Your Name (TEAMID)" your-notary-keychain-profile` from the checkout on an authorized Mac. It signs the existing universal receiver and app, creates a disk image, submits to Apple notarization, staples and verifies it locally. It does not publish a release. The signer and profile must already be installed; no credentials are accepted by the script. The script does not remove the remaining security/device gates.
+
+For iOS, generate the project and set the signing team in Xcode, then use Product > Archive and Organizer > Distribute App only when you explicitly intend distribution. Do not attempt this on CI without provisioning and authorized credentials.

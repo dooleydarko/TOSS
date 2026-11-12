@@ -30,3 +30,5 @@ Version 0.1.2 requires matching new receiver and iPhone builds. Network payloads
 
 ## Export and receiver management
 Review > export saves Markdown, JSON or plain text via the system Files picker. New transfers produce handoff.md, handoff.json and handoff.txt; existing matching receipts gain text output on re-send without changing receipt ID. Settings > Devices manages verified saved pairing codes and forgets a receiver. Queue > Retry with new code recovers a failed transfer after a receiver restart. Pairing codes are stored in the phone's Keychain. Use the new receiver and iPhone builds together.
+
+The repository includes optional local signed Mac packaging instructions in RELEASE_ACCEPTANCE.md. It requires an authorized Apple Developer ID and notarytool profile; developer ZIPs are still ad-hoc signed only.
