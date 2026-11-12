@@ -131,7 +131,8 @@ public final class TossStore: ObservableObject {
         saveHandoff(updated)
     }
 
-    public func tossCurrentHandoff(to device: TossDevice, pairingSecret: String = "toss-dev-secret-change-in-production") async throws -> TransferAck {
+    public func tossCurrentHandoff(to device: TossDevice, pairingSecret: String) async throws -> TransferAck {
+        guard !pairingSecret.isEmpty else { throw TossClientError.pairingRejected("Enter the receiver pairing secret") }
         guard let handoff = currentHandoff else {
             throw TossClientError.transferFailed("No active handoff to send")
         }

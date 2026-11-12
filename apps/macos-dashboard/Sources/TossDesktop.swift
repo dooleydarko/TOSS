@@ -15,7 +15,7 @@ private struct InboxEntry: Identifiable {
     var id: URL { url }
 }
 private struct DesktopInbox: View {
-    @AppStorage("toss.desktop.inbox") private var folder = ""
+    @AppStorage("toss.desktop.inbox") private var folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/TOSS/received").path
     @State private var entries: [InboxEntry] = []
     @State private var selected: URL?
     @State private var query = ""

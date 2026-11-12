@@ -418,6 +418,7 @@ public struct TossView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragOffset: CGSize = .zero
     @State private var chosenDeviceID: String?
+    @State private var pairingSecret = ""
     @State private var outcome: Outcome = .ready
 
     private enum Outcome: Equatable {
@@ -442,7 +443,7 @@ public struct TossView: View {
     }
 
     private var canSend: Bool {
-        guard outcome == .ready, !store.isTransferInProgress, target != nil, let handoff = store.currentHandoff else { return false }
+        guard outcome == .ready, !store.isTransferInProgress, target != nil, !pairingSecret.isEmpty, let handoff = store.currentHandoff else { return false }
         return !store.queue.items.contains { $0.handoff.handoffId == handoff.handoffId && $0.handoff.revision == handoff.revision && !$0.status.isTerminal }
     }
 
@@ -470,6 +471,13 @@ public struct TossView: View {
                                 .disabled(outcome != .ready)
                                 if let target = target {
                                     Text("\(target.host):\(target.port)").font(.caption).foregroundColor(.secondary)
+                                    SecureField("Receiver pairing secret", text: $pairingSecret)
+                                        .textContentType(.password)
+                                        .autocapitalization(.none)
+                                        .disableAutocorrection(true)
+                                        .disabled(outcome != .ready)
+                                    Text("Development transfer uses unencrypted HTTP. Use a trusted private network and test notes only.")
+                                        .font(.caption).foregroundColor(.secondary)
                                 }
                             }
                         }
@@ -548,6 +556,7 @@ public struct TossView: View {
                 outcome = .queued
             }
         }
+        .onChange(of: chosenDeviceID) { _ in pairingSecret = "" }
         .onChange(of: devices) { available in
             if let id = chosenDeviceID, !available.contains(where: { $0.id == id }) { chosenDeviceID = nil }
             if chosenDeviceID == nil && available.count == 1 { chosenDeviceID = available.first?.id }
@@ -566,7 +575,9 @@ public struct TossView: View {
 
     private var statusTitle: String {
         switch outcome {
-        case .ready: return target == nil ? "Choose a receiver to toss" : "Swipe up to toss"
+        case .ready:
+            if target == nil { return "Choose a receiver to toss" }
+            return pairingSecret.isEmpty ? "Enter the receiver pairing secret" : "Swipe up to toss"
         case .sending: return "Sending…"
         case .received: return "Received by your Mac"
         case .queued: return "Saved to offline queue"
@@ -587,7 +598,8 @@ public struct TossView: View {
         }
         Task {
             do {
-                let ack = try await store.tossCurrentHandoff(to: device)
+                let ack = try await store.tossCurrentHandoff(to: device, pairingSecret: pairingSecret)
+                pairingSecret = ""
                 outcome = .received(ack)
             } catch {
                 outcome = store.activeTransferState == .queued ? .queued : .failed(error.localizedDescription)

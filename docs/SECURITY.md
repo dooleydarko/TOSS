@@ -21,3 +21,7 @@
 ### API Credential Leakage
 - **Risk:** Hardcoding Gemini API keys into mobile apps or committing them to source control.
 - **Mitigation:** No production keys are committed. Environment templates (`.env.example`) are used. For cloud deployments, `services/ai-proxy` encapsulates credentials server-side. Additionally, TOSS works completely offline without any API keys.
+
+## Development release gate
+
+The current LAN protocol is plaintext HTTP. SHA-256 detects corruption, not an active attacker who can alter the payload and manifest; pairing secrets and session tokens can be intercepted. The CLI defaults to loopback, advertises only explicit LAN mode, rejects its default/short pairing secret in LAN mode and warns before listening. The iPhone requires an entered secret. These measures are not TLS or peer authentication. Do not transmit sensitive notes, expose a port publicly, or distribute this as a production release until authenticated encryption, receiver identity, pairing revocation, secure retention and device tests are implemented. Previous plaintext preference backups may retain legacy credentials.

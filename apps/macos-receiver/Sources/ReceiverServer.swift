@@ -59,7 +59,11 @@ public final class ReceiverServer {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        inet_pton(AF_INET, host, &addr.sin_addr)
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else {
+            close(serverSocket)
+            serverSocket = -1
+            throw ReceiverError.bindFailed("Invalid IPv4 bind address")
+        }
 
         let bindResult = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -258,8 +262,7 @@ public final class ReceiverServer {
             let responseObj: [String: Any] = [
                 "status": "healthy",
                 "receiver": receiverName,
-                "version": TossHandoff.currentSchemaVersion,
-                "storagePath": storageDirectory.path
+                "version": TossHandoff.currentSchemaVersion
             ]
             sendJSONResponse(clientSocket: clientSocket, status: 200, object: responseObj)
 

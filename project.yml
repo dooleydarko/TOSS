@@ -7,6 +7,8 @@ options:
 
 settings:
   SWIFT_VERSION: "5.7"
+  MARKETING_VERSION: "0.1.0"
+  CURRENT_PROJECT_VERSION: "1"
   ENABLE_USER_SCRIPT_SANDBOXING: NO
 
 targets:
@@ -21,12 +23,8 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.dooleydarko.toss.ios
       INFOPLIST_KEY_UILaunchScreen_Generation: YES
-      INFOPLIST_KEY_NSLocalNetworkUsageDescription: "TOSS uses the local network to discover and transfer handoffs to paired Macs."
-      INFOPLIST_KEY_NSBonjourServices:
-        - "_toss._tcp"
-      GENERATE_INFOPLIST_FILE: YES
-      INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "TOSS converts your spoken notes into editable text for handoffs."
-      INFOPLIST_KEY_NSMicrophoneUsageDescription: "TOSS uses your microphone to transcribe ideas and instructions into structured handoffs."
+      INFOPLIST_FILE: apps/ios/Info.plist
+      GENERATE_INFOPLIST_FILE: NO
 
   TOSS-Receiver:
     type: tool
@@ -38,6 +36,8 @@ targets:
       - path: packages/transfer-protocol/Sources
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.dooleydarko.toss.receiver
+      ONLY_ACTIVE_ARCH: NO
+      ARCHS: "x86_64 arm64"
 
   TOSS-Desktop:
     type: application
@@ -72,3 +72,11 @@ schemes:
     test:
       targets:
         - TOSS-iOS-UI-Tests
+  TOSS-Receiver:
+    build:
+      targets:
+        TOSS-Receiver: all
+  TOSS-Desktop:
+    build:
+      targets:
+        TOSS-Desktop: all
