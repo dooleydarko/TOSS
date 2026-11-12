@@ -347,7 +347,8 @@ public final class ReceiverServer {
             // Sanitize folder name
             let safeTitle = TossSecurityUtils.sanitizeFilename(handoff.title)
             let safeDate = TossSecurityUtils.sanitizeFilename(String(handoff.createdAt.prefix(10)))
-            let folderName = "\(safeDate)_\(safeTitle)_\(handoff.handoffId.prefix(8))"
+            let revisionSuffix = handoff.revision > 1 ? "_r\(handoff.revision)" : ""
+            let folderName = "\(safeDate)_\(safeTitle)_\(handoff.handoffId.prefix(8))\(revisionSuffix)"
             let targetDir = storageDirectory.appendingPathComponent(folderName, isDirectory: true)
 
             transferLock.lock()

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 #if canImport(TossSchema)
 import TossSchema
 #endif
@@ -314,6 +317,12 @@ Task {
         assert(diskHandoff.title == handoff.title, "Saved content must match original")
         let repeated = try await client.sendHandoff(handoff, to: device, authToken: token)
         assert(repeated.receiptId == ack.receiptId, "Identical replay must return original receipt")
+        var revision = handoff
+        revision.revision = 2
+        revision.requirements.append("Second revision")
+        let updated = try await client.sendHandoff(revision, to: device, authToken: token)
+        assert(updated.savedToDirectory != ack.savedToDirectory, "Revision must have a separate destination")
+        assert(FileManager.default.fileExists(atPath: jsonPath), "Original revision must remain on disk")
     }
 
     await testCaseAsync("Receiver rejects oversized and incomplete manifests and expired sessions") {
@@ -324,6 +333,34 @@ Task {
         defer { server.stop() }
         let client = TossClient()
         let device = TossDevice(id: "security-test", name: "Security Test", host: "127.0.0.1", port: 7456)
+        #if canImport(Darwin)
+        func rawStatus(_ header: String) throws -> String {
+            let fd = socket(AF_INET, SOCK_STREAM, 0)
+            guard fd >= 0 else { throw ReceiverError.socketFailed("Test socket") }
+            defer { close(fd) }
+            var addr = sockaddr_in()
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = UInt16(7456).bigEndian
+            inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr)
+            let connected = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+            }
+            guard connected == 0 else { throw ReceiverError.socketFailed("Test connect") }
+            var timeout = timeval(tv_sec: 3, tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            let data = Data(header.utf8)
+            let sent = data.withUnsafeBytes { send(fd, $0.baseAddress, data.count, 0) }
+            guard sent == data.count else { throw ReceiverError.socketFailed("Test send") }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            let count = read(fd, &bytes, bytes.count)
+            guard count > 0 else { throw ReceiverError.socketFailed("Test read") }
+            return String(decoding: bytes.prefix(count), as: UTF8.self)
+        }
+        let oversized = try rawStatus("POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 10485761\r\n\r\n")
+        assert(oversized.contains("413"))
+        let ambiguous = try rawStatus("POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n")
+        assert(ambiguous.contains("400"))
+        #endif
         let token = try await client.pair(with: device, pairingSecret: "test-secret")
         let handoff = TossHandoff(title: "Security Test", destination: .gpt, objective: "Verify rejection", context: "", source: TossSource(type: .text))
         let json = String(decoding: try handoff.toJSONData(), as: UTF8.self)
