@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import AVFoundation
 import Combine
 #if canImport(TossSchema)
@@ -20,94 +21,141 @@ public struct CaptureView: View {
     @State private var dictationBase = ""
     @State private var hasVoiceInput = false
     @State private var processingError: String?
+    @State private var showHistory = false
+
+    private var recordingStatus: String {
+        if isProcessing { return "Creating your handoff…" }
+        switch voice.state {
+        case .idle: return "Tap to speak"
+        case .authorizing: return "Requesting access…"
+        case .recording: return "Listening • tap to stop"
+        case .finishing: return "Finishing transcript…"
+        }
+    }
     @Environment(\.scenePhase) private var scenePhase
 
     public init() {}
 
     public var body: some View {
         NavigationView {
-            Form {
-                Section(header: Text("Capture Idea or Instruction")) {
-                    ZStack(alignment: .topLeading) {
-                        if inputText.isEmpty {
-                            Text("Type your instructions or describe your feature here...")
-                                .foregroundColor(.gray.opacity(0.6))
-                                .padding(.top, 8)
-                                .padding(.leading, 4)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .center) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("TOSS").font(.caption.weight(.heavy)).tracking(3)
+                            Text("What are we building?")
+                                .font(.largeTitle.weight(.bold))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        TextEditor(text: $inputText)
-                            .frame(minHeight: 120)
-                            .disabled(voice.isBusy || isProcessing)
+                        Spacer(minLength: 12)
+                        Button { showHistory = true } label: {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.title2)
+                                .frame(width: 48, height: 48)
+                                .background(TossDesign.surface)
+                                .clipShape(Circle())
+                        }
+                        .accessibilityLabel("Previous handoffs")
+                        .disabled(voice.isBusy || isProcessing)
                     }
-
-                    HStack {
-                        Button(action: toggleRecording) {
-                            HStack {
-                                Image(systemName: voice.state == .recording ? "stop.circle.fill" : "mic.circle.fill")
-                                    .foregroundColor(voice.state == .recording ? .red : .blue)
-                                Text(voice.state == .recording ? "Stop Recording" : "Voice Dictate")
-                            }
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(isProcessing || voice.state == .authorizing || voice.state == .finishing)
-                        Spacer()
-                        if !inputText.isEmpty {
-                            Button("Clear") { inputText = ""; hasVoiceInput = false }
-                                .buttonStyle(.borderless)
-                                .foregroundColor(.secondary)
-                                .disabled(voice.isBusy || isProcessing)
-                        }
-                    }
-                    if voice.state == .recording {
-                        MicrophoneWaveform(levels: voice.levels)
-                        Label("Recording • speak now", systemImage: "waveform")
-                            .font(.caption).foregroundColor(.red)
-                    } else if voice.state == .authorizing || voice.state == .finishing {
+                    .foregroundColor(TossDesign.ink)
+                    Button { showHistory = true } label: {
                         HStack {
-                            ProgressView()
-                            Text(voice.state == .authorizing ? "Requesting access…" : "Finishing transcript…")
-                        }.font(.caption)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Your handoffs").font(.headline)
+                                Text(store.handoffs.first?.title ?? "Your saved projects will appear here")
+                                    .font(.subheadline).foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                        }
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .foregroundColor(TossDesign.ink)
+                        .background(TossDesign.surface)
+                        .clipShape(RoundedRectangle(cornerRadius: TossDesign.cardRadius))
                     }
-                    if let message = voice.errorMessage {
-                        Text(message).font(.caption).foregroundColor(.secondary)
+                    .buttonStyle(.plain)
+                    .disabled(voice.isBusy || isProcessing)
+
+                    TossCard {
+                        VStack(spacing: 8) {
+                            Text("Capture an idea").font(.title2.weight(.bold))
+                            Text("Speak naturally or type your instructions.")
+                                .font(.subheadline).foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                            TossRecordingOrb(recording: voice.state == .recording,
+                                             busy: voice.isBusy, processing: isProcessing,
+                                             action: toggleRecording)
+                            Text(recordingStatus).font(.subheadline.weight(.semibold))
+                                .foregroundColor(voice.state == .recording ? .red : .secondary)
+                            if let message = voice.errorMessage {
+                                Text(message).font(.caption).foregroundColor(.secondary)
+                            }
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Your words").font(.headline)
+                                    Spacer()
+                                    if !inputText.isEmpty {
+                                        Button("Clear") { inputText = ""; hasVoiceInput = false }
+                                            .font(.subheadline)
+                                            .disabled(voice.isBusy || isProcessing)
+                                    }
+                                }
+                                TextEditor(text: $inputText)
+                                    .frame(minHeight: 135)
+                                    .disabled(voice.isBusy || isProcessing)
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
+                                    .accessibilityLabel("Editable transcript")
+                                    .accessibilityIdentifier("capture.transcript")
+                                if inputText.isEmpty {
+                                    Text("Your spoken words will appear here.")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(.top, 8)
+                            Text("Dictation prefers on-device recognition. Apple may process audio when local recognition is unavailable.")
+                                .font(.caption).foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                    Text("Dictation uses on-device speech recognition when available; otherwise Apple may process audio on its servers.")
-                        .font(.caption).foregroundColor(.secondary)
-                }
-
-                Section(header: Text("Optional Context / Project")) {
-                    TextField("E.g. Target module, repository, or issue #", text: $contextText)
-                }
-
-                Section {
+                    TossCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Project context").font(.headline)
+                            TextField("Repository, project or issue (optional)", text: $contextText)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(isProcessing)
+                            Label(store.modelLabel,
+                                  systemImage: "cpu")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text("Change AI settings in the Settings tab.")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                    }
                     Button(action: processAndStructure) {
                         HStack {
-                            Spacer()
-                            if isProcessing {
-                                ProgressView()
-                                    .padding(.trailing, 8)
-                                Text("Structuring with AI...")
-                            } else {
-                                Image(systemName: "wand.and.stars")
-                                Text("Create Structured Handoff")
-                                    .fontWeight(.semibold)
-                            }
-                            Spacer()
+                            if isProcessing { ProgressView().tint(TossDesign.primaryForeground) }
+                            else { Image(systemName: "sparkles") }
+                            Text(isProcessing ? "Creating handoff…" : "Create handoff")
                         }
                     }
+                    .buttonStyle(TossPrimaryButton())
+                    .accessibilityIdentifier("capture.create")
                     .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing || voice.isBusy)
                     if let error = processingError {
                         Text(error).font(.caption).foregroundColor(.red)
                     }
+                    NavigationLink(destination: ReviewView(), isActive: $navigateToReview) { EmptyView() }
+                        .accessibilityHidden(true)
                 }
-
-                NavigationLink(
-                    destination: ReviewView(),
-                    isActive: $navigateToReview,
-                    label: { EmptyView() }
-                )
+                .padding(20)
             }
-            .navigationTitle("TOSS Capture")
+            .background(TossDesign.canvas.ignoresSafeArea())
+            .navigationBarHidden(true)
+            .sheet(isPresented: $showHistory) {
+                HistoryView()
+            }
         }
         .onChange(of: voice.transcript) { text in
             guard !text.isEmpty else { return }
@@ -152,288 +200,460 @@ public struct CaptureView: View {
 }
 
 // MARK: - Review View
+@MainActor
 public struct ReviewView: View {
     @EnvironmentObject var store: TossStore
     @State private var selectedSegment = 0
     @State private var navigateToToss = false
+    @State private var editing = false
+    @State private var exporting = false
+    @State private var exportDocument = TossExportDocument(data: Data())
+    @State private var exportType: UTType = .plainText
+    @State private var exportName = "handoff"
+    @State private var exportError: String?
 
     public init() {}
 
     public var body: some View {
-        VStack {
+        VStack(spacing: 12) {
             if let handoff = store.currentHandoff {
-                Picker("View Mode", selection: $selectedSegment) {
+                Picker("View mode", selection: $selectedSegment) {
                     Text("Overview").tag(0)
                     Text("Markdown").tag(1)
-                    Text("JSON Schema").tag(2)
+                    Text("JSON").tag(2)
+                    Text("Text").tag(3)
                 }
-                .pickerStyle(SegmentedPickerStyle())
-                .padding(.horizontal)
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
                         if selectedSegment == 0 {
-                            overviewCard(handoff)
-                        } else if selectedSegment == 1 {
-                            markdownPreview(handoff)
-                        } else {
-                            jsonPreview(handoff)
-                        }
-                    }
-                    .padding()
-                }
-
-                Divider()
-
-                NavigationLink(
-                    destination: TossView(),
-                    isActive: $navigateToToss,
-                    label: {
-                        Button(action: { navigateToToss = true }) {
-                            HStack {
-                                Image(systemName: "paperplane.fill")
-                                Text("Proceed to Toss / Send")
-                                    .fontWeight(.bold)
+                            TossCard {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(handoff.title).font(.title2.weight(.bold))
+                                    Text("Revision \(handoff.revision)  •  \(handoff.destination.rawValue.capitalized)")
+                                        .font(.caption).foregroundColor(.secondary)
+                                    Text(handoff.objective).font(.body)
+                                }
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
-                            .padding(.horizontal)
+                            detail("Context", text: handoff.context)
+                            detail("Requirements", items: handoff.requirements)
+                            detail("Constraints", items: handoff.constraints)
+                            detail("Completed", items: handoff.completed)
+                            detail("Next actions", items: handoff.nextActions)
+                            detail("Known issues", items: handoff.knownIssues)
+                            if let raw = handoff.source.rawInput { detail("Original notes", text: raw) }
+                        } else {
+                            TossCard {
+                                Text(selectedSegment == 1 ? handoff.toMarkdown() : selectedSegment == 3 ? handoff.toPlainText() : (try? String(decoding: handoff.toJSONData(), as: UTF8.self)) ?? "{}")
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
-                )
+                    .padding(20)
+                }
+                Button { navigateToToss = true } label: {
+                    Label("Ready to toss", systemImage: "arrow.up")
+                }
+                .buttonStyle(TossPrimaryButton())
+                .accessibilityIdentifier("review.ready")
+                .padding(.horizontal, 20)
                 .padding(.bottom, 8)
+                NavigationLink(destination: TossView(), isActive: $navigateToToss) { EmptyView() }
+                    .accessibilityHidden(true)
             } else {
-                Text("No active handoff created.")
-                    .foregroundColor(.secondary)
+                Text("No active handoff").foregroundColor(.secondary)
             }
         }
-        .navigationTitle("Review Handoff")
-    }
-
-    private func overviewCard(_ handoff: TossHandoff) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(handoff.title)
-                .font(.title2)
-                .fontWeight(.bold)
-
-            HStack {
-                Label("Rev \(handoff.revision)", systemImage: "clock.arrow.circlepath")
-                Spacer()
-                Label(handoff.destination.rawValue.capitalized, systemImage: "cpu")
+        .background(TossDesign.canvas.ignoresSafeArea())
+        .navigationBarHidden(false)
+        .navigationTitle("Review handoff")
+        .toolbar {
+            if store.currentHandoff != nil {
+                Menu {
+                    Button("Markdown (.md)") { export(1) }
+                    Button("JSON (.json)") { export(2) }
+                    Button("Plain text (.txt)") { export(3) }
+                } label: { Image(systemName: "square.and.arrow.up") }
+                .accessibilityLabel("Export handoff")
+                Button("Edit") { editing = true }
+                    .accessibilityIdentifier("review.edit")
+                    .disabled(store.isTransferInProgress)
             }
-            .font(.caption)
-            .foregroundColor(.secondary)
-
-            Divider()
-
-            Text("Objective").font(.headline)
-            Text(handoff.objective)
-
-            Text("Requirements").font(.headline)
-            ForEach(handoff.requirements, id: \.self) { req in
-                Text("• \(req)")
-            }
-
-            Text("Next Actions").font(.headline)
-            ForEach(Array(handoff.nextActions.enumerated()), id: \.offset) { index, action in
-                Text("\(index + 1). \(action)")
+        }
+        .fileExporter(isPresented: $exporting, document: exportDocument, contentType: exportType, defaultFilename: exportName) { result in
+            if case .failure(let error) = result { exportError = error.localizedDescription }
+        }
+        .alert("Export failed", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("OK", role: .cancel) { exportError = nil }
+        } message: { Text(exportError ?? "") }
+        .sheet(isPresented: $editing) {
+            if let handoff = store.currentHandoff {
+                HandoffEditView(original: handoff)
+                    .environmentObject(store)
             }
         }
     }
 
-    private func markdownPreview(_ handoff: TossHandoff) -> some View {
-        Text(handoff.toMarkdown())
-            .font(.system(.body, design: .monospaced))
-            .padding(8)
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(8)
+    private func export(_ format: Int) {
+        guard let handoff = store.currentHandoff else { return }
+        do {
+            switch format {
+            case 1:
+                exportDocument = TossExportDocument(data: Data(handoff.toMarkdown().utf8))
+                exportType = UTType(filenameExtension: "md") ?? .plainText
+            case 2:
+                exportDocument = TossExportDocument(data: try handoff.toJSONData())
+                exportType = .json
+            default:
+                exportDocument = TossExportDocument(data: Data(handoff.toPlainText().utf8))
+                exportType = .plainText
+            }
+            exportName = TossSecurityUtils.sanitizeFilename(handoff.title) + "-r\(handoff.revision)"
+            exporting = true
+        } catch { exportError = error.localizedDescription }
     }
 
-    private func jsonPreview(_ handoff: TossHandoff) -> some View {
-        let jsonStr = (try? String(data: handoff.toJSONData(), encoding: .utf8)) ?? "{}"
-        return Text(jsonStr)
-            .font(.system(.footnote, design: .monospaced))
-            .padding(8)
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(8)
+    @ViewBuilder private func detail(_ title: String, text: String) -> some View {
+        if !text.isEmpty {
+            TossCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title).font(.headline)
+                    Text(text).font(.body).textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func detail(_ title: String, items: [String]) -> some View {
+        if !items.isEmpty {
+            TossCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title).font(.headline)
+                    ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                        Text("• \(item)").font(.body)
+                    }
+                }
+            }
+        }
     }
 }
 
-// MARK: - Toss View (Swipe & Send with Spring Physics)
-public struct TossView: View {
+private struct TossExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText, .json, UTType(filenameExtension: "md") ?? .plainText] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
+}
+
+@MainActor
+private struct HandoffEditView: View {
     @EnvironmentObject var store: TossStore
-    @State private var dragOffset: CGSize = .zero
-    @State private var isSending: Bool = false
-    @State private var statusMessage: String = "Ready to Toss"
-    @State private var tossSuccessful: Bool = false
+    @Environment(\.dismiss) private var dismiss
+    let original: TossHandoff
+    @State private var draft: TossHandoff
+    @State private var error: String?
 
-    public init() {}
+    init(original: TossHandoff) {
+        self.original = original
+        _draft = State(initialValue: original)
+    }
 
-    public var body: some View {
-        VStack(spacing: 20) {
-            // Target Receiver Banner
-            if let targetDevice = store.pairedDevices.first {
-                HStack {
-                    Image(systemName: "laptopcomputer")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(targetDevice.name)
-                            .font(.headline)
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 8, height: 8)
-                            Text("\(targetDevice.host):\(targetDevice.port) • Local Wi-Fi")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if store.isDiscoveryActive {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    }
-                }
-                .padding()
-                .background(Color.blue.opacity(0.08))
-                .cornerRadius(14)
-                .padding(.horizontal)
-
-                Spacer()
-
-                // Swipeable Card with Spring Physics & Rotation
-                if let handoff = store.currentHandoff {
-                    VStack(spacing: 14) {
-                        Image(systemName: tossSuccessful ? "checkmark.circle.fill" : "arrow.up.circle.fill")
-                            .font(.system(size: 48))
-                            .foregroundColor(tossSuccessful ? .green : .blue)
-                            .scaleEffect(tossSuccessful ? 1.2 : 1.0)
-                            .animation(.spring(response: 0.3), value: tossSuccessful)
-
-                        Text(handoff.title)
-                            .font(.title3)
-                            .fontWeight(.bold)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-
-                        Text("Swipe up to toss to your Mac")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-
-                        HStack(spacing: 8) {
-                            Text("Rev \(handoff.revision)")
-                                .font(.caption2)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.gray.opacity(0.15))
-                                .cornerRadius(6)
-                            Text(handoff.destination.rawValue.uppercased())
-                                .font(.caption2)
-                                .fontWeight(.bold)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(Color.blue.opacity(0.15))
-                                .foregroundColor(.blue)
-                                .cornerRadius(6)
-                        }
-                    }
-                    .frame(width: 300, height: 230)
-                    .background(Color.white)
-                    .cornerRadius(20)
-                    .shadow(color: Color.black.opacity(min(0.25, 0.08 + Double(abs(dragOffset.height)) / 600.0)), radius: 14, x: 0, y: 8)
-                    .offset(x: dragOffset.width * 0.4, y: dragOffset.height)
-                    .rotationEffect(.degrees(Double(dragOffset.width) / 14.0))
-                    .scaleEffect(max(0.86, 1.0 - abs(dragOffset.height) / 900.0))
-                    .animation(.interactiveSpring(response: 0.35, dampingFraction: 0.72), value: dragOffset)
-                    .gesture(
-                        DragGesture()
-                            .onChanged { gesture in
-                                if gesture.translation.height < 0 {
-                                    dragOffset = gesture.translation
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    TossCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Title").font(.headline)
+                            TextField("Handoff title", text: $draft.title)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("review.edit.title")
+                            Picker("Destination", selection: $draft.destination) {
+                                ForEach(TossDestination.allCases, id: \.self) { value in
+                                    Text(value.rawValue.capitalized).tag(value)
                                 }
                             }
-                            .onEnded { gesture in
-                                if gesture.translation.height < -120 {
-                                    withAnimation(.easeOut(duration: 0.3)) {
-                                        dragOffset = CGSize(width: gesture.translation.width, height: -650)
-                                    }
-                                    triggerSend(device: targetDevice)
-                                } else {
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) {
-                                        dragOffset = .zero
-                                    }
-                                }
-                            }
-                    )
-                }
-
-                Spacer()
-
-                // Status & Receipt Indicator
-                VStack(spacing: 6) {
-                    if let state = store.activeTransferState {
-                        Text(state.description)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(state == .received ? .green : .blue)
+                        }
                     }
-                    if let receipt = store.lastReceipt {
-                        Label("Receipt: \(receipt.receiptId.prefix(8))", systemImage: "checkmark.seal.fill")
-                            .font(.caption)
-                            .foregroundColor(.green)
-                    }
+                    editor("Objective", text: $draft.objective)
+                    editor("Context", text: $draft.context)
+                    listEditor("Requirements", values: $draft.requirements)
+                    listEditor("Constraints", values: $draft.constraints)
+                    listEditor("Completed", values: $draft.completed)
+                    listEditor("Next actions", values: $draft.nextActions)
+                    listEditor("Known issues", values: $draft.knownIssues)
+                    Text("Saving creates a new revision when changes are made. Original notes are preserved.")
+                        .font(.caption).foregroundColor(.secondary)
+                    if let error = error { Text(error).font(.caption).foregroundColor(.red) }
+                    Button("Save changes", action: save)
+                        .buttonStyle(TossPrimaryButton())
+                        .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-
-                // Explicit Accessible Button
-                Button(action: { triggerSend(device: targetDevice) }) {
-                    HStack {
-                        Image(systemName: "paperplane.fill")
-                        Text("Send Handoff to Mac")
-                            .fontWeight(.bold)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(14)
-                    .padding(.horizontal)
-                }
-                .disabled(isSending)
-                .padding(.bottom, 16)
-
-            } else {
-                VStack(spacing: 12) {
-                    ProgressView()
-                    Text("Searching for local Mac receivers via Bonjour...")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding()
+                .padding(20)
             }
-        }
-        .navigationTitle("Toss to Mac")
-        .onAppear {
-            store.startDiscovery()
+            .background(TossDesign.canvas.ignoresSafeArea())
+            .navigationTitle("Edit handoff")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                        .disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
         }
     }
 
-    private func triggerSend(device: TossDevice) {
-        isSending = true
-        Task {
-            do {
-                _ = try await store.tossCurrentHandoff(to: device)
-                tossSuccessful = true
-                isSending = false
-            } catch {
-                isSending = false
-                withAnimation(.spring()) {
-                    dragOffset = .zero
+    private func editor(_ title: String, text: Binding<String>) -> some View {
+        TossCard {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.headline)
+                TextEditor(text: text)
+                    .frame(minHeight: 100)
+                    .accessibilityLabel(title)
+            }
+        }
+    }
+
+    private func listEditor(_ title: String, values: Binding<[String]>) -> some View {
+        TossCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(title).font(.headline)
+                ForEach(values.wrappedValue.indices, id: \.self) { index in
+                    HStack(alignment: .top) {
+                        TextEditor(text: Binding(get: {
+                            values.wrappedValue.indices.contains(index) ? values.wrappedValue[index] : ""
+                        }, set: { newValue in
+                            if values.wrappedValue.indices.contains(index) { values.wrappedValue[index] = newValue }
+                        }))
+                        .frame(minHeight: 52)
+                        .accessibilityLabel("\(title) item \(index + 1)")
+                        Button {
+                            if values.wrappedValue.indices.contains(index) { values.wrappedValue.remove(at: index) }
+                        } label: {
+                            Image(systemName: "minus.circle").frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Remove \(title) item \(index + 1)")
+                    }
+                }
+                Button { values.wrappedValue.append("") } label: {
+                    Label("Add item", systemImage: "plus.circle")
                 }
             }
+        }
+    }
+
+    private func save() {
+        do {
+            try store.saveReviewedHandoff(draft, from: original)
+            dismiss()
+        } catch {
+            self.error = String(describing: error)
+        }
+    }
+}
+
+// MARK: - Toss View
+@MainActor
+public struct TossView: View {
+    @EnvironmentObject var store: TossStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dragOffset: CGSize = .zero
+    @State private var chosenDeviceID: String?
+    @State private var pairingSecret = ""
+    @State private var outcome: Outcome = .ready
+
+    private enum Outcome: Equatable {
+        case ready, sending, received(TransferAck), queued, failed(String)
+    }
+
+    public init() {}
+
+    private var devices: [TossDevice] {
+        #if targetEnvironment(simulator)
+        return store.pairedDevices
+        #else
+        return store.pairedDevices.filter { $0.id != "local-mac" && $0.host != "127.0.0.1" && $0.host != "localhost" }
+        #endif
+    }
+
+    private var target: TossDevice? {
+        if let chosenDeviceID = chosenDeviceID {
+            return devices.first { $0.id == chosenDeviceID }
+        }
+        return devices.count == 1 ? devices.first : nil
+    }
+
+    private var canSend: Bool {
+        guard outcome == .ready, !store.isTransferInProgress, target != nil, !pairingSecret.isEmpty, let handoff = store.currentHandoff else { return false }
+        return !store.queue.items.contains { $0.handoff.handoffId == handoff.handoffId && $0.handoff.revision == handoff.revision && !$0.status.isTerminal }
+    }
+
+    public var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                if let handoff = store.currentHandoff {
+                    TossCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Send to").font(.caption.weight(.semibold)).foregroundColor(.secondary)
+                            if devices.isEmpty {
+                                Label("Looking for a Mac receiver", systemImage: "laptopcomputer")
+                                    .font(.headline)
+                                Text("Open the TOSS receiver on your Mac and connect to the same network.")
+                                    .font(.subheadline).foregroundColor(.secondary)
+                                Button("Search again") { store.startDiscovery() }
+                            } else {
+                                Picker("Mac receiver", selection: $chosenDeviceID) {
+                                    Text("Choose a receiver").tag(String?.none)
+                                    ForEach(devices) { device in
+                                        Text(device.name).tag(Optional(device.id))
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(outcome != .ready)
+                                if let target = target {
+                                    Text("\(target.host):\(target.port)").font(.caption).foregroundColor(.secondary)
+                                    if target.isPaired { Label("Saved pairing", systemImage: "lock.fill").font(.caption) }
+                                    Button("Use saved code") { pairingSecret = store.savedPairingCode(for: target) }
+                                        .disabled(!target.isPaired || outcome != .ready)
+                                    SecureField("Receiver pairing code", text: $pairingSecret)
+                                        .textContentType(.password)
+                                        .autocapitalization(.none)
+                                        .disableAutocorrection(true)
+                                        .disabled(outcome != .ready)
+                                    Text("Enter the private pairing code shown by the Mac receiver. The handoff and receipt are authenticated and encrypted; use a trusted network for developer testing.")
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    VStack(spacing: 10) {
+                        Text(handoff.title).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+                        Text("Revision \(handoff.revision) · \(handoff.destination.rawValue.capitalized)")
+                            .font(.subheadline).foregroundColor(.secondary)
+                        ZStack {
+                            Circle()
+                                .fill(RadialGradient(colors: [.white, Color.blue.opacity(0.9), .purple],
+                                                     center: UnitPoint(x: 0.35, y: 0.3), startRadius: 4, endRadius: 142))
+                                .frame(width: 196, height: 196)
+                                .shadow(color: .purple.opacity(0.26), radius: 22, y: 8)
+                            Image(systemName: ballIcon)
+                                .font(.system(size: 48, weight: .semibold))
+                                .foregroundColor(.white)
+                                .shadow(color: .black.opacity(0.4), radius: 3)
+                        }
+                        .frame(width: 220, height: 220)
+                        .offset(x: dragOffset.width * 0.4, y: dragOffset.height)
+                        .rotationEffect(.degrees(reduceMotion ? 0 : Double(dragOffset.width) / 14))
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture()
+                            .onChanged { gesture in
+                                guard canSend, !reduceMotion else { return }
+                                if gesture.translation.height < 0 { dragOffset = gesture.translation }
+                            }
+                            .onEnded { gesture in
+                                if canSend && gesture.translation.height < -120 {
+                                    send()
+                                } else {
+                                    resetBall()
+                                }
+                            })
+                        .accessibilityLabel("Handoff ball")
+                        .accessibilityIdentifier("toss.ball")
+                        .accessibilityHint("Swipe up or use the Send handoff button")
+                        .accessibilityAddTraits(.isImage)
+
+                        Text(statusTitle).font(.headline).multilineTextAlignment(.center)
+                        if case .received(let receipt) = outcome {
+                            Text("Receipt: \(receipt.receiptId.prefix(8))")
+                                .font(.caption).foregroundColor(.secondary)
+                        } else if case .failed(let reason) = outcome {
+                            Text(reason).font(.caption).foregroundColor(.secondary)
+                        } else if case .queued = outcome {
+                            Text("Open Queue to check delivery. This is not a receipt.")
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 16)
+
+                    Button(action: send) {
+                        Label("Send handoff", systemImage: "arrow.up")
+                    }
+                    .buttonStyle(TossPrimaryButton())
+                    .disabled(!canSend)
+                    if case .failed = outcome {
+                        Button("Try again") { outcome = .ready }
+                    }
+                } else {
+                    Text("No handoff ready to send.").foregroundColor(.secondary)
+                }
+            }
+            .padding(20)
+        }
+        .background(TossDesign.canvas.ignoresSafeArea())
+        .navigationTitle("Toss")
+        .navigationBarBackButtonHidden(outcome == .sending)
+        .onAppear {
+            store.startDiscovery()
+            if chosenDeviceID == nil && devices.count == 1 { chosenDeviceID = devices.first?.id }
+            if let handoff = store.currentHandoff,
+               store.queue.items.contains(where: { $0.handoff.handoffId == handoff.handoffId && $0.handoff.revision == handoff.revision && !$0.status.isTerminal }) {
+                outcome = .queued
+            }
+        }
+        .onChange(of: chosenDeviceID) { _ in pairingSecret = "" }
+        .onChange(of: devices) { available in
+            if let id = chosenDeviceID, !available.contains(where: { $0.id == id }) { chosenDeviceID = nil }
+            if chosenDeviceID == nil && available.count == 1 { chosenDeviceID = available.first?.id }
+        }
+    }
+
+    private var ballIcon: String {
+        switch outcome {
+        case .ready: return "arrow.up"
+        case .sending: return "paperplane.fill"
+        case .received: return "checkmark"
+        case .queued: return "clock"
+        case .failed: return "exclamationmark"
+        }
+    }
+
+    private var statusTitle: String {
+        switch outcome {
+        case .ready:
+            if target == nil { return "Choose a receiver to toss" }
+            return pairingSecret.isEmpty ? "Enter the receiver pairing secret" : "Swipe up to toss"
+        case .sending: return "Sending…"
+        case .received: return "Received by your Mac"
+        case .queued: return "Saved to offline queue"
+        case .failed: return "Could not send"
+        }
+    }
+
+    private func resetBall() {
+        if reduceMotion { dragOffset = .zero }
+        else { withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) { dragOffset = .zero } }
+    }
+
+    private func send() {
+        guard canSend, let device = target else { return }
+        outcome = .sending
+        if !reduceMotion {
+            withAnimation(.easeOut(duration: 0.3)) { dragOffset = CGSize(width: dragOffset.width, height: -450) }
+        }
+        Task {
+            do {
+                let ack = try await store.tossCurrentHandoff(to: device, pairingSecret: pairingSecret.trimmingCharacters(in: .whitespacesAndNewlines))
+                pairingSecret = ""
+                outcome = .received(ack)
+            } catch {
+                outcome = store.activeTransferState == .queued ? .queued : .failed(error.localizedDescription)
+            }
+            resetBall()
         }
     }
 }
@@ -444,15 +664,23 @@ public struct QueueView: View {
 
     public init() {}
 
-    public var body: some View {
+    public var body: some View { QueueList(queue: store.queue) }
+}
+
+private struct QueueList: View {
+    @ObservedObject var queue: TossTransferQueue
+    @State private var retryItem: QueuedTransfer?
+    @State private var replacementCode = ""
+
+    var body: some View {
         NavigationView {
             List {
-                if store.queue.items.isEmpty {
-                    Text("No queued transfers. All handoffs delivered!")
+                if queue.items.isEmpty {
+                    Text("No queued transfers.")
                         .foregroundColor(.secondary)
                         .padding(.vertical, 8)
                 } else {
-                    ForEach(store.queue.items) { item in
+                    ForEach(queue.items) { item in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(item.handoff.title)
                                 .font(.headline)
@@ -463,15 +691,33 @@ public struct QueueView: View {
                             }
                             .font(.caption)
                             .foregroundColor(.secondary)
+                            if case .failed(let reason) = item.status {
+                                Text(reason).font(.caption).foregroundColor(.secondary)
+                                Button("Retry with new code") { replacementCode = ""; retryItem = item }
+                            }
                         }
                         .padding(.vertical, 4)
                     }
                 }
             }
             .navigationTitle("Offline Queue")
+            .sheet(item: $retryItem) { item in
+                NavigationView {
+                    Form {
+                        SecureField("New receiver code", text: $replacementCode)
+                            .autocapitalization(.none).disableAutocorrection(true)
+                        Button("Retry transfer") {
+                            queue.retryWithCode(id: item.id, code: replacementCode.trimmingCharacters(in: .whitespacesAndNewlines))
+                            replacementCode = ""; retryItem = nil
+                        }.disabled(replacementCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .navigationTitle("Update pairing code")
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { retryItem = nil; replacementCode = "" } } }
+                }
+            }
             .toolbar {
                 Button("Retry All") {
-                    store.queue.retryFailedItems()
+                    queue.retryFailedItems()
                 }
             }
         }
@@ -511,6 +757,7 @@ public struct HistoryView: View {
     public var body: some View {
         NavigationView {
             List(filteredHandoffs) { item in
+                NavigationLink(destination: HistoryReviewEntry(handoff: item)) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(item.title)
@@ -535,21 +782,104 @@ public struct HistoryView: View {
                     .foregroundColor(.gray)
                 }
                 .padding(.vertical, 4)
+                }
             }
+            .searchable(text: $searchText)
             .navigationTitle("Handoff History")
         }
+    }
+}
+
+@MainActor
+private struct HistoryReviewEntry: View {
+    @EnvironmentObject var store: TossStore
+    let handoff: TossHandoff
+    var body: some View {
+        ReviewView().onAppear {
+            if !store.isTransferInProgress {
+                store.currentHandoff = store.handoffs.first(where: { $0.handoffId == handoff.handoffId }) ?? handoff
+            }
+        }
+    }
+}
+
+@MainActor
+private struct TossDevicesView: View {
+    @EnvironmentObject var store: TossStore
+    @State private var selected: TossDevice?
+    @State private var code = ""
+    @State private var message = ""
+    @State private var forgetTarget: TossDevice?
+
+    var body: some View {
+        List {
+            Section(header: Text("Mac receivers")) {
+                if store.pairedDevices.isEmpty { Text("No receivers found. Start the Mac receiver and search again.") }
+                ForEach(store.pairedDevices) { device in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(device.name).font(.headline)
+                        Text("\(device.host):\(device.port)").font(.caption).foregroundColor(.secondary)
+                        Text(device.isPaired ? "Saved pairing" : "Not paired").font(.caption)
+                        Text(store.reachableDeviceIDs.contains(device.id) ? "Discovered on network" : "Not currently discovered").font(.caption).foregroundColor(.secondary)
+                        Button(device.isPaired ? "Re-pair" : "Pair") { code = ""; message = ""; selected = device }
+                            .disabled(store.pairingInProgress)
+                        if device.isPaired {
+                            Button("Forget receiver", role: .destructive) { forgetTarget = device }
+                                .disabled(store.isTransferInProgress || store.pairingInProgress)
+                        }
+                    }.padding(.vertical, 4)
+                }
+                Button("Search again") { store.startDiscovery() }
+            }
+            Section { Text("Discovery is not trust. Verify the code on your Mac. Forgetting removes this phone's saved code and pending transfers to that endpoint; an already sent request cannot be recalled. Restart the receiver to rotate its code for all phones.").font(.caption) }
+        }
+        .navigationTitle("Devices")
+        .onAppear { store.startDiscovery() }
+        .sheet(item: $selected) { device in
+            NavigationView {
+                Form {
+                    Text(device.name)
+                    SecureField("Receiver pairing code", text: $code).autocapitalization(.none).disableAutocorrection(true)
+                    Button(store.pairingInProgress ? "Pairing…" : "Verify and pair") {
+                        Task {
+                            do {
+                                try await store.pairDevice(device, code: code.trimmingCharacters(in: .whitespacesAndNewlines))
+                                code = ""; selected = nil
+                            } catch { message = error.localizedDescription }
+                        }
+                    }.disabled(code.isEmpty || store.pairingInProgress)
+                    if !message.isEmpty { Text(message).foregroundColor(.red).font(.caption) }
+                }.navigationTitle("Pair receiver")
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { code = ""; selected = nil }.disabled(store.pairingInProgress) } }
+            }.interactiveDismissDisabled(store.pairingInProgress)
+        }
+        .confirmationDialog("Forget this receiver?", isPresented: Binding(get: { forgetTarget != nil }, set: { if !$0 { forgetTarget = nil } })) {
+            Button("Forget receiver and queued sends", role: .destructive) {
+                if let device = forgetTarget { store.forgetDevice(device) }
+                forgetTarget = nil
+            }
+        } message: { Text("Saved trust and pending transfers to this receiver will be removed. Delivered handoffs remain in history.") }
     }
 }
 
 // MARK: - Settings View
 public struct SettingsView: View {
     @EnvironmentObject var store: TossStore
+    @AppStorage("toss.appearance") private var appearance = "Dark"
 
     public init() {}
 
     public var body: some View {
         NavigationView {
             Form {
+                Section(header: Text("Appearance")) {
+                    Picker("Theme", selection: $appearance) {
+                        Text("Dark").tag("Dark")
+                        Text("Light").tag("Light")
+                        Text("System").tag("System")
+                    }
+                    .accessibilityIdentifier("settings.appearance")
+                }
                 Section(header: Text("AI Structuring Provider")) {
                     Picker("Destination Target", selection: $store.preferredDestination) {
                         ForEach(TossDestination.allCases, id: \.self) { dest in
@@ -557,16 +887,32 @@ public struct SettingsView: View {
                         }
                     }
 
-                    SecureField("Gemini API Key (Optional)", text: $store.geminiApiKey)
-                    TextField("Model", text: $store.selectedModel)
-
-                    Text("Without an API key, handoff structuring uses the built-in offline rule-based formatter.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Picker("Provider", selection: Binding(get: { store.modelKind }, set: { store.selectModelKind($0) })) {
+                        ForEach(TossModelKind.allCases) { kind in Text(kind.label).tag(kind) }
+                    }
+                    if store.modelKind != .offline {
+                        SecureField("API key", text: $store.modelKey)
+                            .textContentType(.password)
+                            .autocapitalization(.none)
+                        TextField("Exact API model ID", text: $store.selectedModel)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                        if store.modelKind == .compatible {
+                            TextField("HTTPS chat completions URL", text: $store.modelEndpoint)
+                                .keyboardType(.URL).autocapitalization(.none)
+                        }
+                        Text("API access and quotas are separate from chat subscriptions. OpenRouter free models are rate limited.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                    Button("Save model settings") { store.saveModelSettings() }
+                    Text(store.modelSettingsMessage).font(.caption).foregroundColor(.secondary)
                 }
 
+                Section(header: Text("Devices")) {
+                    NavigationLink(destination: TossDevicesView()) { Label("Manage receivers", systemImage: "laptopcomputer") }
+                }
                 Section(header: Text("Privacy & Security")) {
-                    Text("Dictation prefers on-device speech recognition; Apple may process audio when local recognition is unavailable. TOSS does not save audio files. Project notes are sent to Gemini only when you configure an AI key and initiate structuring.")
+                    Text("Dictation prefers on-device speech recognition; Apple may process audio when local recognition is unavailable. TOSS does not save audio files. When you create a handoff with a remote model, your notes and context are sent to that selected provider. Offline formatting sends no notes to a model. API keys are stored in the device Keychain.")
                         .font(.caption)
                 }
             }
@@ -592,6 +938,8 @@ public struct TossAppView: View {
                 .tabItem {
                     Label("History", systemImage: "clock.fill")
                 }
+            DiscoverView()
+                .tabItem { Label("Discover", systemImage: "square.grid.2x2") }
             QueueView()
                 .tabItem {
                     Label("Queue", systemImage: "arrow.triangle.2.circlepath")

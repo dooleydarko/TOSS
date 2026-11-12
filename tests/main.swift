@@ -96,6 +96,40 @@ testCase("History Engine Revisions and Diffing") {
     assert(reloaded.search(query: "Searchable").first?.revision == 2)
 }
 
+testCase("Review edits preserve source, revisions and JSON output") {
+    let original = TossHandoff(title: "Original", objective: "Before", context: "Context", requirements: ["One"], source: TossSource(type: .voice, transcriptAvailable: true, rawInput: "Original spoken words"))
+    var draft = original
+    draft.title = "Edited"
+    draft.requirements.append("Two")
+    draft.source.rawInput = "Must not replace original"
+    let updated = try TossReviewRevision.edited(draft, from: original, latestRevision: 1)
+    assert(updated.revision == 2 && updated.title == "Edited")
+    assert(updated.source == original.source && updated.projectId == original.projectId && updated.handoffId == original.handoffId)
+    assert(updated.requirements == ["One", "Two"])
+    let snapshots = TossReviewRevision.upsert(updated, into: [original])
+    assert(snapshots.count == 2 && TossReviewRevision.latest(in: snapshots) == [updated])
+    let restored = try JSONDecoder().decode([TossHandoff].self, from: JSONEncoder().encode(snapshots))
+    assert(restored.contains(original) && restored.contains(updated))
+    let decoded = try TossHandoff.fromJSONData(updated.toJSONData())
+    assert(decoded == updated && decoded.toMarkdown().contains("Two"))
+    let unchanged = try TossReviewRevision.edited(updated, from: updated, latestRevision: 2)
+    assert(unchanged == updated)
+    do {
+        _ = try TossReviewRevision.edited(draft, from: original, latestRevision: 2)
+        throw TossValidationError.invalidField("Stale edit accepted")
+    } catch TossValidationError.invalidField(let message) {
+        assert(message.contains("newer revision"))
+    }
+    var invalid = updated
+    invalid.title = "  "
+    do {
+        _ = try TossReviewRevision.edited(invalid, from: updated, latestRevision: 2)
+        throw TossValidationError.invalidField("Invalid title accepted")
+    } catch TossValidationError.invalidField(let message) {
+        assert(message.contains("title must not be empty"))
+    }
+}
+
 testCase("Empty Title Fails Validation") {
     let invalid = TossHandoff(
         title: "   ",
@@ -132,6 +166,13 @@ testCase("JSON Serialization Round-trip") {
     assert(original.destination == decoded.destination, "Destination must match")
 }
 
+testCase("Plain text export preserves original notes and structured content") {
+    let handoff = TossHandoff(title: "Export Test", objective: "Objective text", context: "Context text", requirements: ["Requirement one"], source: TossSource(type: .text, rawInput: "Original note"))
+    let text = handoff.toPlainText()
+    assert(text.contains("Export Test") && text.contains("Requirement one") && text.contains("Original note"))
+    assert(!text.hasPrefix("#"))
+}
+
 testCase("Markdown Serialization") {
     let handoff = TossHandoff(
         title: "Markdown Title",
@@ -158,6 +199,31 @@ testCase("SHA-256 Checksum Computation") {
     assert(hex == TossSecurityUtils.sha256Hex(of: text), "Hash must be deterministic")
 }
 
+testCase("Authenticated secure transport rejects tampering and response replay") {
+    let secret = String(repeating: "a1", count: 32)
+    let message = Data("private handoff text".utf8)
+    let path = TossSecureTransport.transferPath
+    let request = try TossSecureTransport.sealRequest(message, secret: secret, path: path)
+    assert(request.range(of: message) == nil)
+    let decoded = try TossSecureTransport.openRequest(request, secret: secret, path: path)
+    assert(decoded == message)
+    var altered = request
+    altered[altered.count - 1] ^= 1
+    assert((try? TossSecureTransport.openRequest(altered, secret: secret, path: path)) == nil)
+    assert((try? TossSecureTransport.openRequest(request, secret: "wrong", path: path)) == nil)
+    assert((try? TossSecureTransport.openRequest(request, secret: secret, path: TossSecureTransport.pairPath)) == nil)
+    let stale = try TossSecureTransport.sealRequest(message, secret: secret, path: path, now: Date().addingTimeInterval(-300))
+    assert((try? TossSecureTransport.openRequest(stale, secret: secret, path: path)) == nil)
+    let response = try TossSecureTransport.sealResponse(message, secret: secret, path: path, request: request, status: 200)
+    let reopened = try TossSecureTransport.openResponse(response, secret: secret, path: path, request: request, status: 200)
+    assert(reopened == message)
+    let next = try TossSecureTransport.sealRequest(message, secret: secret, path: path)
+    assert(next != request)
+    assert((try? TossSecureTransport.openResponse(response, secret: secret, path: path, request: next, status: 200)) == nil)
+    assert((try? TossSecureTransport.openResponse(response, secret: secret, path: path, request: request, status: 401)) == nil)
+    assert(TossSecureTransport.isLANCode(secret) && !TossSecureTransport.isLANCode("weak"))
+}
+
 testCase("Path Traversal and File Sanitization") {
     let malicious = "../../../etc/passwd"
     let clean = TossSecurityUtils.sanitizeFilename(malicious)
@@ -166,7 +232,13 @@ testCase("Path Traversal and File Sanitization") {
 }
 
 testCase("Offline Queue Enqueue and Tracking") {
-    let queue = TossTransferQueue()
+    let suite = "toss.queue.test.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var secrets: [String: String] = [:]
+    let credentials = TossQueueCredentialStore(read: { secrets[$0] },
+        write: { secrets[$0] = $1; return true }, remove: { secrets.removeValue(forKey: $0) })
+    let queue = TossTransferQueue(defaults: defaults, credentials: credentials, send: { _ in "test-receipt" })
     let handoff = TossHandoff(
         title: "Queued Offline Handoff",
         destination: .gpt,
@@ -178,6 +250,100 @@ testCase("Offline Queue Enqueue and Tracking") {
     let item = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
     assert(item.status == .pending, "Initial status must be pending")
     assert(queue.items.contains(where: { $0.id == item.id }), "Queue must contain enqueued item")
+    let duplicate = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
+    assert(duplicate.id == item.id && queue.items.count == 1, "Duplicate pending transfers must be coalesced")
+    let raw = defaults.data(forKey: "toss_queued_transfers")!
+    let saved = try! JSONDecoder().decode([QueuedTransfer].self, from: raw)
+    assert(saved.first?.pairingSecret == "", "Pairing credential must not be in preferences")
+    let restored = TossTransferQueue(defaults: defaults, credentials: credentials)
+    assert(restored.items.first?.id == item.id, "Pending transfer must survive reload")
+    assert(restored.items.first?.pairingSecret == "secret", "Credential must restore from secure storage")
+    // Simulate a legacy queue with an embedded secret and verify migration.
+    defaults.set(try! JSONEncoder().encode([item]), forKey: "toss_queued_transfers")
+    secrets.removeAll()
+    let migrated = TossTransferQueue(defaults: defaults, credentials: credentials)
+    assert(migrated.items.first?.pairingSecret == "secret")
+    assert(secrets[item.id] == "secret")
+    let migratedData = defaults.data(forKey: "toss_queued_transfers")!
+    assert(try! JSONDecoder().decode([QueuedTransfer].self, from: migratedData).first?.pairingSecret == "")
+    let unavailable = TossQueueCredentialStore(read: { _ in nil }, write: { _, _ in false }, remove: { _ in })
+    let blocked = TossTransferQueue(defaults: defaults, queueKey: "blocked", credentials: unavailable, send: { _ in
+        assertionFailure("A transfer without secure credentials must not send")
+        return "unexpected"
+    })
+    let failed = blocked.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
+    assert(failed.status.isTerminal, "Credential storage failure must fail closed")
+}
+
+testCase("Queue retries and updates the correct transfer after insertion") {
+    let suite = "toss.queue.retry.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let device = TossDevice(id: "queue-test", name: "Test Mac", host: "127.0.0.1", port: 7443)
+    let first = TossHandoff(title: "First", objective: "Retry first", context: "Test", source: TossSource(type: .text))
+    let second = TossHandoff(title: "Second", objective: "Send second", context: "Test", source: TossSource(type: .text))
+    var secrets: [String: String] = [:]
+    let credentials = TossQueueCredentialStore(read: { secrets[$0] },
+        write: { secrets[$0] = $1; return true }, remove: { secrets.removeValue(forKey: $0) })
+    let queue = TossTransferQueue(defaults: defaults, retryBase: 0.02, credentials: credentials, send: { item in
+        assert(item.pairingSecret == "test", "Retry must receive the correct secure credential")
+        try await Task.sleep(nanoseconds: 80_000_000)
+        if item.handoff.handoffId == first.handoffId && item.attempts == 1 {
+            throw TossClientError.networkError("Injected failure")
+        }
+        return "receipt-" + item.handoff.handoffId
+    })
+    let firstItem = queue.enqueue(handoff: first, targetDevice: device, pairingSecret: "test")
+    let startDeadline = Date().addingTimeInterval(2)
+    while queue.items.first?.attempts == 0 && Date() < startDeadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    assert(queue.items.first?.attempts == 1, "First send must start")
+    let secondItem = queue.enqueue(handoff: second, targetDevice: device, pairingSecret: "test")
+    let deadline = Date().addingTimeInterval(5)
+    while queue.items.contains(where: { !$0.status.isTerminal }) && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    assert(queue.items.first(where: { $0.id == firstItem.id })?.status == .completed(receiptId: "receipt-" + first.handoffId))
+    assert(queue.items.first(where: { $0.id == firstItem.id })?.attempts == 2)
+    assert(queue.items.first(where: { $0.id == secondItem.id })?.status == .completed(receiptId: "receipt-" + second.handoffId))
+    let restored = TossTransferQueue(defaults: defaults, credentials: credentials)
+    assert(restored.items == queue.items, "Final receipts must persist")
+    assert(secrets.isEmpty, "Completed transfer credentials must be removed")
+}
+
+testCase("Queue re-pair and forget preserve delivery history") {
+    let suite = "toss.queue.repair.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var secrets: [String: String] = [:]
+    let credentials = TossQueueCredentialStore(read: { secrets[$0] },
+        write: { secrets[$0] = $1; return true }, remove: { secrets.removeValue(forKey: $0) })
+    let device = TossDevice(id: "mac", name: "Mac", host: "127.0.0.1")
+    let queue = TossTransferQueue(defaults: defaults, retryBase: 0.02, credentials: credentials, send: { item in
+        guard item.pairingSecret == "new" else { throw TossClientError.pairingRejected("Old code") }
+        return "receipt-new"
+    })
+    let handoff = TossHandoff(title: "Re-pair", objective: "Recover", context: "", source: TossSource(type: .text))
+    let item = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "old")
+    let deadline = Date().addingTimeInterval(3)
+    while queue.items.first?.status.isTerminal == false && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    guard let status = queue.items.first?.status, case .failed = status else { assertionFailure("Invalid code must fail"); return }
+    queue.retryWithCode(id: item.id, code: "new")
+    let retryDeadline = Date().addingTimeInterval(3)
+    while queue.items.first?.status.isTerminal == false && Date() < retryDeadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    assert(queue.items.first?.status == .completed(receiptId: "receipt-new"))
+    assert(secrets[item.id] == nil)
+    var second = handoff
+    second.revision = 2
+    let pending = queue.enqueue(handoff: second, targetDevice: device, pairingSecret: "old")
+    queue.forgetReceiver(device)
+    assert(queue.items.count == 1 && queue.items.first?.id == item.id)
+    assert(secrets[pending.id] == nil)
 }
 
 testCase("Bonjour Discovery Service Lifecycle") {
@@ -185,6 +351,24 @@ testCase("Bonjour Discovery Service Lifecycle") {
     service.startAdvertising(name: "Test Receiver Discovery", port: 7499)
     service.stopAdvertising()
     assert(true, "Bonjour service must start and stop cleanly")
+}
+
+testCase("Model request routing, response validation and original starter independence") {
+    let starter = TossStarter.library[0]
+    let first = try starter.handoff(customNotes: "Original user notes", destination: .gpt)
+    let second = try starter.handoff(customNotes: "Other notes", destination: .claude)
+    assert(first.handoffId != second.handoffId && first.projectId != second.projectId)
+    let provider = TossRemoteProvider(kind: .claude, model: "test-model", key: "test-key")
+    let request = try provider.makeRequest(input: "notes", context: "context")
+    assert(request.url?.host == "api.anthropic.com")
+    assert(request.value(forHTTPHeaderField: "x-api-key") == "test-key")
+    let json = String(decoding: try first.toJSONData(), as: UTF8.self)
+    let envelope = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": json]]]])
+    let decoded = try TossRemoteProvider.decode(envelope, kind: .openAI, originalInput: "verbatim")
+    assert(decoded.source.rawInput == "verbatim")
+    let insecure = TossRemoteProvider(kind: .compatible, model: "local", key: "", endpoint: "http://example.com")
+    do { _ = try insecure.makeRequest(input: "x", context: ""); assertionFailure("HTTP endpoint must be rejected") }
+    catch { }
 }
 
 // 3. AI Provider Offline Fallback
@@ -301,6 +485,9 @@ Task {
         assert(ack.handoffId == handoff.handoffId, "ACK handoff ID must match")
         assert(ack.receivedFiles.contains("handoff.json"), "Must contain handoff.json")
         assert(ack.receivedFiles.contains("handoff.md"), "Must contain handoff.md")
+        assert(ack.receivedFiles.contains("handoff.txt"), "Must contain handoff.txt")
+        let exportedText = try String(contentsOf: URL(fileURLWithPath: ack.savedToDirectory).appendingPathComponent("handoff.txt"), encoding: .utf8)
+        assert(exportedText == handoff.toPlainText())
 
         // Verify disk files
         let savedDir = URL(fileURLWithPath: ack.savedToDirectory)
@@ -361,6 +548,28 @@ Task {
         let ambiguous = try rawStatus("POST /transfer HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n")
         assert(ambiguous.contains("400"))
         #endif
+        // Exercise the actual encrypted HTTP route, not just the crypto helper.
+        let pair = PairingRequest(deviceId: "test", deviceName: "Replay fixture", pairingSecret: "test-secret")
+        let pairBody = try TossSecureTransport.sealRequest(JSONEncoder().encode(pair), secret: "test-secret", path: TossSecureTransport.pairPath)
+        func post(_ body: Data, path: String) async throws -> (Data, Int) {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:7456" + path)!)
+            request.httpMethod = "POST"
+            request.setValue(TossSecureTransport.contentType, forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+            let (data, response) = try await URLSession.shared.data(for: request)
+            return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
+        }
+        let firstPair = try await post(pairBody, path: TossSecureTransport.pairPath)
+        assert(firstPair.1 == 200)
+        let opened = try TossSecureTransport.openResponse(firstPair.0, secret: "test-secret", path: TossSecureTransport.pairPath, request: pairBody, status: 200)
+        let pairing = try JSONDecoder().decode(PairingResponse.self, from: opened)
+        assert(pairing.accepted && pairing.token != nil)
+        let replay = try await post(pairBody, path: TossSecureTransport.pairPath)
+        assert(replay.1 == 409, "Encrypted pairing replay must be rejected")
+        var tampered = pairBody
+        tampered[tampered.count - 1] ^= 1
+        let corrupt = try await post(tampered, path: TossSecureTransport.pairPath)
+        assert(corrupt.1 == 401, "Tampered encrypted request must be rejected")
         let token = try await client.pair(with: device, pairingSecret: "test-secret")
         let handoff = TossHandoff(title: "Security Test", destination: .gpt, objective: "Verify rejection", context: "", source: TossSource(type: .text))
         let json = String(decoding: try handoff.toJSONData(), as: UTF8.self)

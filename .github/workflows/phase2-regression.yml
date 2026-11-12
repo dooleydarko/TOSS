@@ -1,7 +1,7 @@
 name: TOSS Phase 2 regression
 on:
   push:
-    branches: [phase2-gpt-refinements, phase3-hardening, main]
+    branches: [phase2-gpt-refinements, phase3-hardening, ui-foundation, main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -26,9 +26,40 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate
-          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/toss-build" CODE_SIGNING_ALLOWED=NO build
+      - name: Build macOS desktop inbox for Intel and Apple Silicon
+        run: |
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-Desktop -configuration Debug -destination 'generic/platform=macOS' -derivedDataPath "$RUNNER_TEMP/toss-desktop" CODE_SIGNING_ALLOWED=NO build
+      - name: Launch iPhone simulator and capture home screen
+        if: github.ref_name == 'ui-foundation'
+        shell: bash
+        run: |
+          set -eo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in sorted(d.items(),reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" "$RUNNER_TEMP/toss-build/Build/Products/Debug-iphonesimulator/TOSS-iOS.app"
+          xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios -toss.appearance Dark
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot bin/toss-home.png
+          xcrun simctl terminate "$DEVICE" com.dooleydarko.toss.ios
+          xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios -toss.appearance Light
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot bin/toss-home-light.png
+          xcrun simctl terminate "$DEVICE" com.dooleydarko.toss.ios
+      - name: Exercise the iPhone starter, review and Toss UI
+        if: github.ref_name == 'ui-foundation'
+        shell: bash
+        run: |
+          set -eo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in sorted(d.items(),reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/toss-build" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test | tee bin/ui-test.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: regression-log
-          path: bin/regression.log
+          path: |
+            bin/regression.log
+            bin/toss-home.png
+            bin/toss-home-light.png
+            bin/ui-test.log

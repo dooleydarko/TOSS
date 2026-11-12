@@ -25,6 +25,8 @@ public final class ReceiverServer {
     private let maxHeaderBytes = 16 * 1024
     private let maxBodyBytes = 10 * 1024 * 1024
     private let transferLock = NSLock()
+    private let replayLock = NSLock()
+    private var pairingRequests: [String: Date] = [:]
     private var serverSocket: Int32 = -1
     private var isRunning: Bool = false
     private let queue = DispatchQueue(label: "com.toss.receiver.server", attributes: .concurrent)
@@ -46,6 +48,9 @@ public final class ReceiverServer {
     }
 
     public func start(blocking: Bool = false) throws {
+        guard host == "127.0.0.1" || TossSecureTransport.isLANCode(pairingSecret) else {
+            throw ReceiverError.bindFailed("LAN requires a random 256-bit pairing code")
+        }
         try FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
 
         serverSocket = socket(AF_INET, SOCK_STREAM, 0)
@@ -59,7 +64,11 @@ public final class ReceiverServer {
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = port.bigEndian
-        inet_pton(AF_INET, host, &addr.sin_addr)
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else {
+            close(serverSocket)
+            serverSocket = -1
+            throw ReceiverError.bindFailed("Invalid IPv4 bind address")
+        }
 
         let bindResult = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -258,15 +267,18 @@ public final class ReceiverServer {
             let responseObj: [String: Any] = [
                 "status": "healthy",
                 "receiver": receiverName,
-                "version": TossHandoff.currentSchemaVersion,
-                "storagePath": storageDirectory.path
+                "version": TossHandoff.currentSchemaVersion
             ]
             sendJSONResponse(clientSocket: clientSocket, status: 200, object: responseObj)
 
-        case ("POST", "/pair"):
+        case ("POST", TossSecureTransport.pairPath), ("POST", TossSecureTransport.transferPath):
+            handleSecureRoute(path: path, body: body, clientSocket: clientSocket)
+
+        // Legacy raw protocol is limited to explicit loopback developer tests.
+        case ("POST", "/pair") where host == "127.0.0.1":
             handlePairing(body: body, clientSocket: clientSocket)
 
-        case ("POST", "/transfer"):
+        case ("POST", "/transfer") where host == "127.0.0.1":
             handleTransfer(body: body, clientSocket: clientSocket)
 
         default:
@@ -274,43 +286,77 @@ public final class ReceiverServer {
         }
     }
 
-    private func handlePairing(body: Data, clientSocket: Int32) {
+    private struct SecureReply {
+        let path: String
+        let request: Data
+    }
+
+    private func acceptPairingRequest(_ request: Data) -> Bool {
+        let fingerprint = TossSecurityUtils.sha256Hex(of: request)
+        replayLock.lock(); defer { replayLock.unlock() }
+        let now = Date()
+        pairingRequests = pairingRequests.filter { $0.value > now }
+        guard pairingRequests[fingerprint] == nil, pairingRequests.count < 4096 else { return false }
+        // A request can be timestamped 120 seconds in the future.
+        pairingRequests[fingerprint] = now.addingTimeInterval(241)
+        return true
+    }
+
+    private func handleSecureRoute(path: String, body: Data, clientSocket: Int32) {
+        do {
+            let decoded = try TossSecureTransport.openRequest(body, secret: pairingSecret, path: path)
+            let reply = SecureReply(path: path, request: body)
+            if path == TossSecureTransport.pairPath {
+                guard acceptPairingRequest(body) else {
+                    sendResponse(clientSocket: clientSocket, status: 409, body: "Duplicate pairing request")
+                    return
+                }
+                handlePairing(body: decoded, clientSocket: clientSocket, secure: reply)
+            } else {
+                handleTransfer(body: decoded, clientSocket: clientSocket, secure: reply)
+            }
+        } catch {
+            sendResponse(clientSocket: clientSocket, status: 401, body: "Secure request rejected")
+        }
+    }
+
+    private func handlePairing(body: Data, clientSocket: Int32, secure: SecureReply? = nil) {
         do {
             let decoder = JSONDecoder()
             let req = try decoder.decode(PairingRequest.self, from: body)
             if secretsMatch(req.pairingSecret) {
                 guard let sessionToken = issueSession() else {
-                    sendResponse(clientSocket: clientSocket, status: 503, body: "Session capacity reached")
+                    sendResponse(clientSocket: clientSocket, status: 503, body: "Session capacity reached", secure: secure)
                     return
                 }
                 let resp = PairingResponse(accepted: true, token: sessionToken, receiverName: receiverName, message: "Paired successfully")
                 let respData = try JSONEncoder().encode(resp)
-                sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: respData)
+                sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: respData, secure: secure)
                 print("[TOSS Receiver] Device paired: \(req.deviceName) (\(req.deviceId))")
             } else {
                 let resp = PairingResponse(accepted: false, receiverName: receiverName, message: "Invalid pairing secret")
                 let respData = try JSONEncoder().encode(resp)
-                sendDataResponse(clientSocket: clientSocket, status: 401, contentType: "application/json", data: respData)
+                sendDataResponse(clientSocket: clientSocket, status: 401, contentType: "application/json", data: respData, secure: secure)
             }
         } catch {
-            sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid pairing request payload: \(error.localizedDescription)")
+            sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid pairing request payload: \(error.localizedDescription)", secure: secure)
         }
     }
 
-    private func handleTransfer(body: Data, clientSocket: Int32) {
+    private func handleTransfer(body: Data, clientSocket: Int32, secure: SecureReply? = nil) {
         do {
             let decoder = JSONDecoder()
             let payload = try decoder.decode(TransferPayload.self, from: body)
 
             // Validate session token
             guard validSession(payload.authToken) else {
-                sendResponse(clientSocket: clientSocket, status: 401, body: "Unauthorized: Invalid or expired session token")
+                sendResponse(clientSocket: clientSocket, status: 401, body: "Unauthorized: Invalid or expired session token", secure: secure)
                 return
             }
 
             // Validate JSON against Schema
             guard let jsonData = payload.jsonContent.data(using: .utf8) else {
-                sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid JSON encoding")
+                sendResponse(clientSocket: clientSocket, status: 400, body: "Invalid JSON encoding", secure: secure)
                 return
             }
             let handoff = try TossHandoff.fromJSONData(jsonData)
@@ -323,7 +369,7 @@ public final class ReceiverServer {
                   UUID(uuidString: handoff.projectId) != nil,
                   payload.manifest.files.count == 2,
                   Set(payload.manifest.files.map(\.filename)) == Set(["handoff.json", "handoff.md"]) else {
-                sendResponse(clientSocket: clientSocket, status: 422, body: "Invalid transfer manifest")
+                sendResponse(clientSocket: clientSocket, status: 422, body: "Invalid transfer manifest", secure: secure)
                 return
             }
             // Check manifest checksums and sizes
@@ -332,13 +378,13 @@ public final class ReceiverServer {
                 if fileItem.filename == "handoff.json" {
                     let actual = TossSecurityUtils.sha256Hex(of: payload.jsonContent)
                     if actual != expected || fileItem.sizeBytes != jsonData.count {
-                        sendResponse(clientSocket: clientSocket, status: 422, body: "Checksum mismatch for handoff.json")
+                        sendResponse(clientSocket: clientSocket, status: 422, body: "Checksum mismatch for handoff.json", secure: secure)
                         return
                     }
                 } else if fileItem.filename == "handoff.md" {
                     let actual = TossSecurityUtils.sha256Hex(of: payload.markdownContent)
                     if actual != expected || fileItem.sizeBytes != payload.markdownContent.utf8.count {
-                        sendResponse(clientSocket: clientSocket, status: 422, body: "Checksum mismatch for handoff.md")
+                        sendResponse(clientSocket: clientSocket, status: 422, body: "Checksum mismatch for handoff.md", secure: secure)
                         return
                     }
                 }
@@ -355,43 +401,58 @@ public final class ReceiverServer {
             defer { transferLock.unlock() }
             let fm = FileManager.default
             if let attrs = try? fm.attributesOfItem(atPath: targetDir.path), attrs[.type] as? FileAttributeType != .typeDirectory {
-                sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination")
+                sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination", secure: secure)
                 return
             }
             try fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
             guard targetDir.resolvingSymlinksInPath().deletingLastPathComponent().path == storageDirectory.resolvingSymlinksInPath().path else {
-                sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination")
+                sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination", secure: secure)
                 return
             }
 
             let jsonURL = targetDir.appendingPathComponent("handoff.json")
             let mdURL = targetDir.appendingPathComponent("handoff.md")
             let receiptURL = targetDir.appendingPathComponent("receipt.json")
+            let textURL = targetDir.appendingPathComponent("handoff.txt")
 
-            for url in [jsonURL, mdURL, receiptURL] {
+            for url in [jsonURL, mdURL, textURL, receiptURL] {
                 if let attrs = try? fm.attributesOfItem(atPath: url.path), attrs[.type] as? FileAttributeType != .typeRegular {
-                    sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination file")
+                    sendResponse(clientSocket: clientSocket, status: 422, body: "Unsafe destination file", secure: secure)
                     return
                 }
             }
             if fm.fileExists(atPath: receiptURL.path) {
-                guard let oldReceipt = try? JSONDecoder().decode(TransferAck.self, from: Data(contentsOf: receiptURL)),
+                guard var oldReceipt = try? JSONDecoder().decode(TransferAck.self, from: Data(contentsOf: receiptURL)),
                       oldReceipt.handoffId == handoff.handoffId,
                       (try? Data(contentsOf: jsonURL)) == jsonData,
                       (try? Data(contentsOf: mdURL)) == Data(payload.markdownContent.utf8) else {
-                    sendResponse(clientSocket: clientSocket, status: 409, body: "Existing receipt conflicts with payload")
+                    sendResponse(clientSocket: clientSocket, status: 409, body: "Existing receipt conflicts with payload", secure: secure)
                     return
                 }
-                sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: try JSONEncoder().encode(oldReceipt))
+                let textData = Data(handoff.toPlainText().utf8)
+                if fm.fileExists(atPath: textURL.path) {
+                    guard (try? Data(contentsOf: textURL)) == textData else {
+                        sendResponse(clientSocket: clientSocket, status: 409, body: "Existing plain text conflicts with payload", secure: secure)
+                        return
+                    }
+                } else {
+                    try textData.write(to: textURL, options: .atomic)
+                }
+                if !oldReceipt.receivedFiles.contains("handoff.txt") {
+                    oldReceipt.receivedFiles.append("handoff.txt")
+                    try JSONEncoder().encode(oldReceipt).write(to: receiptURL, options: .atomic)
+                }
+                sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: try JSONEncoder().encode(oldReceipt), secure: secure)
                 return
             }
             try payload.jsonContent.write(to: jsonURL, atomically: true, encoding: .utf8)
             try payload.markdownContent.write(to: mdURL, atomically: true, encoding: .utf8)
+            try handoff.toPlainText().write(to: textURL, atomically: true, encoding: .utf8)
 
             let ack = TransferAck(
                 handoffId: handoff.handoffId,
                 accepted: true,
-                receivedFiles: ["handoff.json", "handoff.md"],
+                receivedFiles: ["handoff.json", "handoff.md", "handoff.txt"],
                 savedToDirectory: targetDir.path,
                 message: "Handoff successfully received, verified, and saved."
             )
@@ -400,16 +461,16 @@ public final class ReceiverServer {
             try ackData.write(to: receiptURL, options: .atomic)
 
             print("[TOSS Receiver] Successfully received handoff '\(handoff.title)' to \(targetDir.path)")
-            sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: ackData)
+            sendDataResponse(clientSocket: clientSocket, status: 200, contentType: "application/json", data: ackData, secure: secure)
 
         } catch {
-            sendResponse(clientSocket: clientSocket, status: 400, body: "Transfer processing failed: \(error.localizedDescription)")
+            sendResponse(clientSocket: clientSocket, status: 400, body: "Transfer processing failed: \(error.localizedDescription)", secure: secure)
         }
     }
 
-    private func sendResponse(clientSocket: Int32, status: Int, body: String) {
+    private func sendResponse(clientSocket: Int32, status: Int, body: String, secure: SecureReply? = nil) {
         let data = body.data(using: .utf8) ?? Data()
-        sendDataResponse(clientSocket: clientSocket, status: status, contentType: "text/plain", data: data)
+        sendDataResponse(clientSocket: clientSocket, status: status, contentType: "text/plain", data: data, secure: secure)
     }
 
     private func sendJSONResponse(clientSocket: Int32, status: Int, object: [String: Any]) {
@@ -420,7 +481,13 @@ public final class ReceiverServer {
         }
     }
 
-    private func sendDataResponse(clientSocket: Int32, status: Int, contentType: String, data: Data) {
+    private func sendDataResponse(clientSocket: Int32, status: Int, contentType: String, data: Data, secure: SecureReply? = nil) {
+        if let secure = secure {
+            guard let sealed = try? TossSecureTransport.sealResponse(data, secret: pairingSecret,
+                path: secure.path, request: secure.request, status: status) else { return }
+            sendDataResponse(clientSocket: clientSocket, status: status, contentType: TossSecureTransport.contentType, data: sealed)
+            return
+        }
         let statusText: String
         switch status {
         case 200: statusText = "OK"

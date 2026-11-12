@@ -93,11 +93,12 @@ public final class GeminiAIProvider: AIProvider {
 
     public func health() async -> Bool {
         guard isConfigured else { return false }
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model)?key=\(apiKey)") else {
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model)") else {
             return false
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.timeoutInterval = 5.0
         guard let (_, response) = try? await URLSession.shared.data(for: request),
               let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -109,10 +110,10 @@ public final class GeminiAIProvider: AIProvider {
     public func structure(input: String, context: String) async throws -> TossHandoff {
         guard isConfigured else {
             // Fallback gracefully
-            return try await RuleBasedFallbackProvider().structure(input: input, context: context)
+            throw TossValidationError.invalidField("Gemini API key is missing")
         }
 
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)") else {
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent") else {
             throw TossValidationError.invalidField("Invalid Gemini endpoint URL")
         }
 
@@ -126,6 +127,7 @@ public final class GeminiAIProvider: AIProvider {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -133,12 +135,12 @@ public final class GeminiAIProvider: AIProvider {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                return try await RuleBasedFallbackProvider().structure(input: input, context: context)
+                throw TossValidationError.invalidField("Gemini request failed (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0))")
             }
             return try Self.decodeResponse(data, originalInput: input)
         } catch {
             try Task.checkCancellation()
-            return try await RuleBasedFallbackProvider().structure(input: input, context: context)
+            throw error
         }
     }
 

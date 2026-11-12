@@ -1,0 +1,38 @@
+name: TOSS developer release packages
+on:
+  push:
+    branches: [ui-foundation]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'project.yml'
+      - 'scripts/**'
+      - 'docs/DEVELOPER_RELEASE.md'
+      - '.github/workflows/developer-release.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: developer-release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Regression suite
+        run: |
+          mkdir -p bin
+          swiftc packages/handoff-schema/Sources/*.swift packages/transfer-protocol/Sources/*.swift apps/macos-receiver/Sources/ReceiverServer.swift tests/main.swift -o bin/toss-test-runner
+          ./bin/toss-test-runner
+      - name: Build, smoke test and package
+        run: bash scripts/package-developer-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TOSS-developer-packages
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14

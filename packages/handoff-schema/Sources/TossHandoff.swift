@@ -206,6 +206,30 @@ public struct TossHandoff: Codable, Equatable, Identifiable {
         return lines.joined(separator: "\n")
     }
 
+    /// Plain-text export retains the structured instructions and original notes.
+    public func toPlainText() -> String {
+        var lines = [title, "Revision: \(revision)", "Destination: \(destination.rawValue)",
+                     "Handoff ID: \(handoffId)", "Project ID: \(projectId)",
+                     "Created: \(createdAt)", "Updated: \(updatedAt)", ""]
+        func section(_ heading: String, _ values: [String]) {
+            lines.append(heading.uppercased())
+            lines.append(contentsOf: values.isEmpty ? ["(None)"] : values)
+            lines.append("")
+        }
+        section("Objective", [objective])
+        section("Context", [context])
+        section("Requirements", requirements)
+        section("Constraints", constraints)
+        section("Completed", completed)
+        section("Next actions", nextActions)
+        section("Known issues", knownIssues)
+        if let repo = repository {
+            section("Repository", [repo.url, repo.branch, repo.commit].compactMap { $0 })
+        }
+        section("Original notes", [source.rawInput].compactMap { $0 })
+        return lines.joined(separator: "\n")
+    }
+
     /// Serializes handoff into formatted JSON
     public func toJSONData() throws -> Data {
         let encoder = JSONEncoder()

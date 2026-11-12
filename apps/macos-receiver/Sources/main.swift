@@ -7,6 +7,10 @@ import TossProtocol
 #endif
 
 let args = CommandLine.arguments
+if args.count == 2 && args[1] == "--version" {
+    print("TOSS Receiver — secure protocol v2")
+    exit(0)
+}
 
 var port: UInt16 = 7443
 var host = "127.0.0.1"
@@ -42,6 +46,15 @@ while i < args.count {
     i += 1
 }
 
+// LAN routes use authenticated application-layer encryption, not TLS.
+let isLAN = host != "127.0.0.1"
+if isLAN && !TossSecureTransport.isLANCode(secret) {
+    fputs("LAN requires a randomly generated 256-bit pairing code (64 lowercase hex digits). Use the bundled launcher.\n", stderr)
+    exit(2)
+}
+if isLAN {
+    fputs("TOSS secure developer LAN mode. Keep the pairing code private; use a trusted network.\n", stderr)
+}
 let storageURL = URL(fileURLWithPath: storageDir)
 let receiverName = Host.current().localizedName ?? "Mac Receiver"
 let server = ReceiverServer(
@@ -53,16 +66,25 @@ let server = ReceiverServer(
 )
 
 let discovery = TossDiscoveryService()
-discovery.startAdvertising(name: receiverName, port: Int32(port))
-
-signal(SIGINT) { _ in
-    print("\n[TOSS Receiver] Terminating on SIGINT...")
-    discovery.stopAdvertising()
-    exit(0)
+// Keep the main run loop alive so NetService can actually advertise.
+// DispatchSource handles shutdown outside an async-signal-unsafe handler.
+signal(SIGINT, SIG_IGN)
+signal(SIGTERM, SIG_IGN)
+let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+for source in [interrupt, terminate] {
+    source.setEventHandler {
+        discovery.stopAdvertising()
+        server.stop()
+        exit(0)
+    }
+    source.resume()
 }
 
 do {
-    try server.start(blocking: true)
+    try server.start(blocking: false)
+    if isLAN { discovery.startAdvertising(name: receiverName, port: Int32(port)) }
+    RunLoop.main.run()
 } catch {
     print("[TOSS Receiver Error] \(error)")
     exit(1)

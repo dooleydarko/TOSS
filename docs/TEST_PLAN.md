@@ -43,3 +43,8 @@ swiftc \
 
 ./bin/toss-test-runner
 ```
+
+## 0.1.3 acceptance additions
+- Export all formats from iPhone review; compare to same revision on Mac, including UTF-8 and original notes. Replay a pre-text receipt and confirm receipt ID survives.
+- Pair on actual Wi-Fi; verify code is required, saved in Keychain, and not granted by Bonjour. Restart receiver, re-pair, retry failed queue with replacement code; forget receiver and verify pending sends are removed while delivered history remains.
+- Confirm UI in dark/light/system and microphone permission denied/granted paths. No automatic handoff execution.
