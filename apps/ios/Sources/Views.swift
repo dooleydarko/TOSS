@@ -471,12 +471,12 @@ public struct TossView: View {
                                 .disabled(outcome != .ready)
                                 if let target = target {
                                     Text("\(target.host):\(target.port)").font(.caption).foregroundColor(.secondary)
-                                    SecureField("Receiver pairing secret", text: $pairingSecret)
+                                    SecureField("Receiver pairing code", text: $pairingSecret)
                                         .textContentType(.password)
                                         .autocapitalization(.none)
                                         .disableAutocorrection(true)
                                         .disabled(outcome != .ready)
-                                    Text("Development transfer uses unencrypted HTTP. Use a trusted private network and test notes only.")
+                                    Text("Enter the private pairing code shown by the Mac receiver. The handoff and receipt are authenticated and encrypted; use a trusted network for developer testing.")
                                         .font(.caption).foregroundColor(.secondary)
                                 }
                             }

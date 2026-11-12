@@ -192,6 +192,31 @@ testCase("SHA-256 Checksum Computation") {
     assert(hex == TossSecurityUtils.sha256Hex(of: text), "Hash must be deterministic")
 }
 
+testCase("Authenticated secure transport rejects tampering and response replay") {
+    let secret = String(repeating: "a1", count: 32)
+    let message = Data("private handoff text".utf8)
+    let path = TossSecureTransport.transferPath
+    let request = try TossSecureTransport.sealRequest(message, secret: secret, path: path)
+    assert(request.range(of: message) == nil)
+    let decoded = try TossSecureTransport.openRequest(request, secret: secret, path: path)
+    assert(decoded == message)
+    var altered = request
+    altered[altered.count - 1] ^= 1
+    assert((try? TossSecureTransport.openRequest(altered, secret: secret, path: path)) == nil)
+    assert((try? TossSecureTransport.openRequest(request, secret: "wrong", path: path)) == nil)
+    assert((try? TossSecureTransport.openRequest(request, secret: secret, path: TossSecureTransport.pairPath)) == nil)
+    let stale = try TossSecureTransport.sealRequest(message, secret: secret, path: path, now: Date().addingTimeInterval(-300))
+    assert((try? TossSecureTransport.openRequest(stale, secret: secret, path: path)) == nil)
+    let response = try TossSecureTransport.sealResponse(message, secret: secret, path: path, request: request, status: 200)
+    let reopened = try TossSecureTransport.openResponse(response, secret: secret, path: path, request: request, status: 200)
+    assert(reopened == message)
+    let next = try TossSecureTransport.sealRequest(message, secret: secret, path: path)
+    assert(next != request)
+    assert((try? TossSecureTransport.openResponse(response, secret: secret, path: path, request: next, status: 200)) == nil)
+    assert((try? TossSecureTransport.openResponse(response, secret: secret, path: path, request: request, status: 401)) == nil)
+    assert(TossSecureTransport.isLANCode(secret) && !TossSecureTransport.isLANCode("weak"))
+}
+
 testCase("Path Traversal and File Sanitization") {
     let malicious = "../../../etc/passwd"
     let clean = TossSecurityUtils.sanitizeFilename(malicious)

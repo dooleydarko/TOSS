@@ -4,25 +4,40 @@ import TossSchema
 #endif
 
 public final class TossClient {
+    private let sessionLock = NSLock()
+    private var sessionSecrets: [String: (secret: String, host: String, port: Int)] = [:]
     public init() {}
+
+    private func remember(token: String, secret: String, device: TossDevice) {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        if sessionSecrets.count >= 128 { sessionSecrets.removeAll() }
+        sessionSecrets[token] = (secret, device.host, device.port)
+    }
+
+    private func secret(for token: String, device: TossDevice) -> String? {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        guard let entry = sessionSecrets[token], entry.host == device.host, entry.port == device.port else { return nil }
+        return entry.secret
+    }
 
     /// Initiates pairing handshake with a receiver
     public func pair(with device: TossDevice, pairingSecret: String) async throws -> String {
-        guard let url = URL(string: "http://\(device.host):\(device.port)/pair") else {
+        guard let url = URL(string: "http://\(device.host):\(device.port)" + TossSecureTransport.pairPath) else {
             throw TossClientError.invalidURL
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(TossSecureTransport.contentType, forHTTPHeaderField: "Content-Type")
 
         let pairReq = PairingRequest(
             deviceId: UUID().uuidString.lowercased(),
             deviceName: "iPhone Client",
             pairingSecret: pairingSecret
         )
-        request.httpBody = try JSONEncoder().encode(pairReq)
+        let sealed = try TossSecureTransport.sealRequest(JSONEncoder().encode(pairReq), secret: pairingSecret, path: TossSecureTransport.pairPath)
+        request.httpBody = sealed
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -30,15 +45,16 @@ public final class TossClient {
         }
 
         guard httpResponse.statusCode == 200 else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw TossClientError.pairingRejected(errorMsg)
+            throw TossClientError.pairingRejected("Receiver rejected secure pairing (HTTP \(httpResponse.statusCode))")
         }
 
-        let pairResp = try JSONDecoder().decode(PairingResponse.self, from: data)
+        let decoded = try TossSecureTransport.openResponse(data, secret: pairingSecret, path: TossSecureTransport.pairPath, request: sealed, status: httpResponse.statusCode)
+        let pairResp = try JSONDecoder().decode(PairingResponse.self, from: decoded)
         guard pairResp.accepted, let token = pairResp.token else {
             throw TossClientError.pairingRejected(pairResp.message)
         }
 
+        remember(token: token, secret: pairingSecret, device: device)
         return token
     }
 
@@ -51,7 +67,10 @@ public final class TossClient {
     ) async throws -> TransferAck {
         progressHandler?(.connecting)
 
-        guard let url = URL(string: "http://\(device.host):\(device.port)/transfer") else {
+        guard let secret = secret(for: authToken, device: device) else {
+            throw TossClientError.pairingRejected("Pair securely with this receiver first")
+        }
+        guard let url = URL(string: "http://\(device.host):\(device.port)" + TossSecureTransport.transferPath) else {
             progressHandler?(.failed("Invalid device URL"))
             throw TossClientError.invalidURL
         }
@@ -88,8 +107,9 @@ public final class TossClient {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 30
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
+        request.setValue(TossSecureTransport.contentType, forHTTPHeaderField: "Content-Type")
+        let sealed = try TossSecureTransport.sealRequest(JSONEncoder().encode(payload), secret: secret, path: TossSecureTransport.transferPath)
+        request.httpBody = sealed
 
         progressHandler?(.verifying)
 
@@ -101,13 +121,13 @@ public final class TossClient {
         }
 
         guard httpResponse.statusCode == 200 else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            let err = TossClientError.transferFailed(errorMsg)
+            let err = TossClientError.transferFailed("Receiver rejected secure transfer (HTTP \(httpResponse.statusCode))")
             progressHandler?(.failed(err.localizedDescription))
             throw err
         }
 
-        let ack = try JSONDecoder().decode(TransferAck.self, from: data)
+        let decoded = try TossSecureTransport.openResponse(data, secret: secret, path: TossSecureTransport.transferPath, request: sealed, status: httpResponse.statusCode)
+        let ack = try JSONDecoder().decode(TransferAck.self, from: decoded)
         guard ack.accepted, ack.handoffId == handoff.handoffId, !ack.receiptId.isEmpty,
               Set(ack.receivedFiles).isSuperset(of: ["handoff.json", "handoff.md"]) else {
             let error = TossClientError.transferFailed("Missing or invalid receiver acknowledgment")

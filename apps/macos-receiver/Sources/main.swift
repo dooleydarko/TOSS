@@ -42,15 +42,14 @@ while i < args.count {
     i += 1
 }
 
-// Network exposure is an explicit development-only decision. The current
-// protocol is HTTP, not TLS; never use it on an untrusted network.
+// LAN routes use authenticated application-layer encryption, not TLS.
 let isLAN = host != "127.0.0.1"
-if isLAN && (secret == "toss-dev-secret-change-in-production" || secret.utf8.count < 16) {
-    fputs("LAN mode requires a custom pairing secret of at least 16 bytes. Use TOSS_PAIRING_SECRET.\n", stderr)
+if isLAN && !TossSecureTransport.isLANCode(secret) {
+    fputs("LAN requires a randomly generated 256-bit pairing code (64 lowercase hex digits). Use the bundled launcher.\n", stderr)
     exit(2)
 }
 if isLAN {
-    fputs("WARNING: Development LAN mode uses unencrypted HTTP. Use only a trusted private network and non-sensitive test notes.\n", stderr)
+    fputs("TOSS secure developer LAN mode. Keep the pairing code private; use a trusted network.\n", stderr)
 }
 let storageURL = URL(fileURLWithPath: storageDir)
 let receiverName = Host.current().localizedName ?? "Mac Receiver"
