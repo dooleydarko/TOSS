@@ -1,4 +1,4 @@
-# TOSS — shared UI foundation (v0.2)
+# TOSS — shared UI foundation (v0.3)
 Status: proposed design baseline; not yet applied to application screens.
 
 Primary reference approved by the owner: [Ronas IT — Self-care Mobile App Design Concept](https://dribbble.com/shots/23278774-Self-care-Mobile-App-Design-Concept).
@@ -54,3 +54,11 @@ Use system semantic colors for success, warning, error and dark mode; validate c
 5. No merge to main until the visual review and functional checks pass. Keep ongoing hardening work separate and reconcile via reviewed integration.
 
 For other web projects, port the semantic tokens and component states, not the iOS code. Add a component gallery showing normal, pressed, focused, disabled, loading, empty and error variants. Each project may set its own accent and imagery while sharing the rules above.
+
+## Recording-to-handoff interaction (owner clarification)
+- The home tracking area is the actual voice capture workspace: microphone button, live waveform, and visible, continuously updating speech-to-text directly underneath. The waveform is not a replacement for the words.
+- Preserve the raw editable transcript separately from the structured output; allow stop, correction and additional dictation before structuring.
+- A clearly labeled Create Handoff action sends the transcript to the configured AI structuring provider. The existing offline formatter is a fallback and must not be misrepresented as a live AI model. Show processing, errors and retry states, keeping the raw words intact.
+- The review area presents the AI-generated title, goals, requirements, constraints and next actions, with existing Markdown and JSON modes. Let the user inspect and edit before sending; continuing an existing handoff should retain revision history.
+- Only a successfully prepared handoff is represented by the tossable ball. Swiping or tapping Send transfers the reviewed artifact, not the raw audio. Maintain transfer receipt and offline queue behavior.
+- No new chat service or AI provider is required for the initial UI implementation; existing Apple Speech capture and configurable Gemini structuring are separate stages. Do not claim always-on conversational AI is implemented.
