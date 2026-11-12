@@ -26,6 +26,10 @@ final class TossFlowTests: XCTestCase {
         if !useStarter.isHittable { app.swipeUp() }
         XCTAssertTrue(useStarter.waitForExistence(timeout: 8))
         useStarter.tap()
+        let plainText = app.segmentedControls.buttons["Text"]
+        XCTAssertTrue(plainText.waitForExistence(timeout: 8))
+        plainText.tap()
+        XCTAssertTrue(app.buttons["Export handoff"].exists)
         let edit = app.buttons["review.edit"]
         XCTAssertTrue(edit.waitForExistence(timeout: 8))
         edit.tap()

@@ -18,3 +18,6 @@ Base: 9db6c89 (previous regression workflow passed). GPT is conducting this revi
 
 ## 0.1.2 follow-up
 Implemented authenticated application-layer encryption, generated pairing codes, and request-bound acknowledgments. Plaintext v1 endpoints are restricted to loopback test fixtures. This is not TLS, forward secrecy, independent device identity or production certification. Real device testing and updated queue credential recovery are still required. Review the new CI results, then continue with remaining MVP export and device management requirements.
+
+## 0.1.3 follow-up
+Three-format export, saved receiver pairing, local forget and queue re-key are implemented. New regression and simulator checks are pending. Apple signing, notarization and physical iPhone/Intel tests cannot be substituted by CI compilation. See RELEASE_ACCEPTANCE.md for the exact sequence and external prerequisites.

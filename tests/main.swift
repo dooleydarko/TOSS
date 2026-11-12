@@ -312,6 +312,40 @@ testCase("Queue retries and updates the correct transfer after insertion") {
     assert(secrets.isEmpty, "Completed transfer credentials must be removed")
 }
 
+testCase("Queue re-pair and forget preserve delivery history") {
+    let suite = "toss.queue.repair.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    var secrets: [String: String] = [:]
+    let credentials = TossQueueCredentialStore(read: { secrets[$0] },
+        write: { secrets[$0] = $1; return true }, remove: { secrets.removeValue(forKey: $0) })
+    let device = TossDevice(id: "mac", name: "Mac", host: "127.0.0.1")
+    let queue = TossTransferQueue(defaults: defaults, retryBase: 0.02, credentials: credentials, send: { item in
+        guard item.pairingSecret == "new" else { throw TossClientError.pairingRejected("Old code") }
+        return "receipt-new"
+    })
+    let handoff = TossHandoff(title: "Re-pair", objective: "Recover", context: "", source: TossSource(type: .text))
+    let item = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "old")
+    let deadline = Date().addingTimeInterval(3)
+    while queue.items.first?.status.isTerminal == false && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    guard let status = queue.items.first?.status, case .failed = status else { assertionFailure("Invalid code must fail"); return }
+    queue.retryWithCode(id: item.id, code: "new")
+    let retryDeadline = Date().addingTimeInterval(3)
+    while queue.items.first?.status.isTerminal == false && Date() < retryDeadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    assert(queue.items.first?.status == .completed(receiptId: "receipt-new"))
+    assert(secrets[item.id] == nil)
+    var second = handoff
+    second.revision = 2
+    let pending = queue.enqueue(handoff: second, targetDevice: device, pairingSecret: "old")
+    queue.forgetReceiver(device)
+    assert(queue.items.count == 1 && queue.items.first?.id == item.id)
+    assert(secrets[pending.id] == nil)
+}
+
 testCase("Bonjour Discovery Service Lifecycle") {
     let service = TossDiscoveryService()
     service.startAdvertising(name: "Test Receiver Discovery", port: 7499)

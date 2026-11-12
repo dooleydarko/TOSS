@@ -647,7 +647,7 @@ public struct TossView: View {
         }
         Task {
             do {
-                let ack = try await store.tossCurrentHandoff(to: device, pairingSecret: pairingSecret)
+                let ack = try await store.tossCurrentHandoff(to: device, pairingSecret: pairingSecret.trimmingCharacters(in: .whitespacesAndNewlines))
                 pairingSecret = ""
                 outcome = .received(ack)
             } catch {
