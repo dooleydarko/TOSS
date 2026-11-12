@@ -86,7 +86,11 @@ testCase("History Engine Revisions and Diffing") {
     assert(diff.newlyCompletedActions == ["Action 1"], "Diff must report newly completed action")
 
     let searchResults = engine.search(query: "Searchable")
-    assert(searchResults.count == 1, "Search must find handoff by keyword")
+    assert(searchResults.count == 1, "Search must find latest handoff by keyword")
+    assert(engine.history(forProjectId: base.projectId).map(\.revision) == [1, 2])
+    let reloaded = TossHistoryEngine(storageURL: tempURL)
+    assert(reloaded.history(forProjectId: base.projectId).map(\.revision) == [1, 2])
+    assert(reloaded.search(query: "Searchable").first?.revision == 2)
 }
 
 testCase("Empty Title Fails Validation") {
@@ -308,6 +312,34 @@ Task {
         let diskData = try Data(contentsOf: URL(fileURLWithPath: jsonPath))
         let diskHandoff = try TossHandoff.fromJSONData(diskData)
         assert(diskHandoff.title == handoff.title, "Saved content must match original")
+        let repeated = try await client.sendHandoff(handoff, to: device, authToken: token)
+        assert(repeated.receiptId == ack.receiptId, "Identical replay must return original receipt")
+    }
+
+    await testCaseAsync("Receiver rejects oversized and incomplete manifests and expired sessions") {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("toss_security_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let server = ReceiverServer(port: 7456, storageDirectory: tempDir, pairingSecret: "test-secret", sessionLifetime: 2)
+        try server.start()
+        defer { server.stop() }
+        let client = TossClient()
+        let device = TossDevice(id: "security-test", name: "Security Test", host: "127.0.0.1", port: 7456)
+        let token = try await client.pair(with: device, pairingSecret: "test-secret")
+        let handoff = TossHandoff(title: "Security Test", destination: .gpt, objective: "Verify rejection", context: "", source: TossSource(type: .text))
+        let json = String(decoding: try handoff.toJSONData(), as: UTF8.self)
+        let payload = TransferPayload(authToken: token, manifest: TransferManifest(handoffId: handoff.handoffId, title: handoff.title, schemaVersion: handoff.schemaVersion, files: []), markdownContent: handoff.toMarkdown(), jsonContent: json)
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:7456/transfer")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+        let (_, invalidResponse) = try await URLSession.shared.data(for: request)
+        assert((invalidResponse as? HTTPURLResponse)?.statusCode == 422)
+        try await Task.sleep(nanoseconds: 2_100_000_000)
+        var rejected = false
+        do { _ = try await client.sendHandoff(handoff, to: device, authToken: token) }
+        catch { rejected = true }
+        assert(rejected, "Expired session must reject transfer")
+        assert((try? FileManager.default.contentsOfDirectory(atPath: tempDir.path))?.isEmpty == true)
     }
 
     print("\n===============================")

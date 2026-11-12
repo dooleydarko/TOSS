@@ -1,7 +1,7 @@
 name: TOSS Phase 2 regression
 on:
   push:
-    branches: [phase2-gpt-refinements, main]
+    branches: [phase2-gpt-refinements, phase3-hardening, main]
   pull_request:
   workflow_dispatch:
 permissions:
