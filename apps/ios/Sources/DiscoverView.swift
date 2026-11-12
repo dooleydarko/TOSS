@@ -22,7 +22,7 @@ struct DiscoverView: View {
                                     Text(starter.notes).font(.subheadline).foregroundColor(.secondary).lineLimit(3)
                                 }.foregroundColor(TossDesign.ink)
                             }
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(.plain).accessibilityIdentifier("starter.\(starter.id)")
                     }
                 }.padding(20)
             }.background(TossDesign.canvas).searchable(text: $query).navigationTitle("Discover")
@@ -51,7 +51,7 @@ private struct StarterDetail: View {
                         store.saveHandoff(handoff)
                         review = true
                     } catch { self.error = error.localizedDescription }
-                }.buttonStyle(TossPrimaryButton()).disabled(store.isTransferInProgress)
+                }.buttonStyle(TossPrimaryButton()).accessibilityIdentifier("starter.use").disabled(store.isTransferInProgress)
                 if !error.isEmpty { Text(error).foregroundColor(.red) }
                 NavigationLink(destination: ReviewView(), isActive: $review) { EmptyView() }
             }.padding(20)

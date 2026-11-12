@@ -42,6 +42,13 @@ jobs:
           xcrun simctl launch "$DEVICE" com.dooleydarko.toss.ios
           sleep 4
           xcrun simctl io "$DEVICE" screenshot bin/toss-home.png
+      - name: Exercise the iPhone starter, review and Toss UI
+        if: github.ref_name == 'ui-foundation'
+        shell: bash
+        run: |
+          set -eo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in sorted(d.items(),reverse=True) if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          xcodebuild -project TOSS.xcodeproj -scheme TOSS-iOS -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath "$RUNNER_TEMP/toss-build" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test | tee bin/ui-test.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -49,3 +56,4 @@ jobs:
           path: |
             bin/regression.log
             bin/toss-home.png
+            bin/ui-test.log

@@ -51,3 +51,24 @@ targets:
       GENERATE_INFOPLIST_FILE: YES
       ONLY_ACTIVE_ARCH: NO
       ARCHS: "x86_64 arm64"
+
+  TOSS-iOS-UI-Tests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: apps/ios/UITests
+    dependencies:
+      - target: TOSS-iOS
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  TOSS-iOS:
+    build:
+      targets:
+        TOSS-iOS: all
+        TOSS-iOS-UI-Tests: [test]
+    test:
+      targets:
+        - TOSS-iOS-UI-Tests

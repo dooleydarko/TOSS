@@ -107,6 +107,7 @@ public struct CaptureView: View {
                                     .disabled(voice.isBusy || isProcessing)
                                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.18)))
                                     .accessibilityLabel("Editable transcript")
+                                    .accessibilityIdentifier("capture.transcript")
                                 if inputText.isEmpty {
                                     Text("Your spoken words will appear here.")
                                         .font(.caption).foregroundColor(.secondary)
@@ -139,6 +140,7 @@ public struct CaptureView: View {
                         }
                     }
                     .buttonStyle(TossPrimaryButton())
+                    .accessibilityIdentifier("capture.create")
                     .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isProcessing || voice.isBusy)
                     if let error = processingError {
                         Text(error).font(.caption).foregroundColor(.red)
@@ -250,6 +252,7 @@ public struct ReviewView: View {
                     Label("Ready to toss", systemImage: "arrow.up")
                 }
                 .buttonStyle(TossPrimaryButton())
+                .accessibilityIdentifier("review.ready")
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
                 NavigationLink(destination: TossView(), isActive: $navigateToToss) { EmptyView() }
@@ -264,6 +267,7 @@ public struct ReviewView: View {
         .toolbar {
             if store.currentHandoff != nil {
                 Button("Edit") { editing = true }
+                    .accessibilityIdentifier("review.edit")
                     .disabled(store.isTransferInProgress)
             }
         }
@@ -502,6 +506,7 @@ public struct TossView: View {
                                 }
                             })
                         .accessibilityLabel("Handoff ball")
+                        .accessibilityIdentifier("toss.ball")
                         .accessibilityHint("Swipe up or use the Send handoff button")
                         .accessibilityAddTraits(.isImage)
 

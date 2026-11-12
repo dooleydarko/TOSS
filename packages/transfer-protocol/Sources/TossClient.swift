@@ -14,6 +14,7 @@ public final class TossClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let pairReq = PairingRequest(
@@ -86,6 +87,7 @@ public final class TossClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
 
@@ -106,6 +108,12 @@ public final class TossClient {
         }
 
         let ack = try JSONDecoder().decode(TransferAck.self, from: data)
+        guard ack.accepted, ack.handoffId == handoff.handoffId, !ack.receiptId.isEmpty,
+              Set(ack.receivedFiles).isSuperset(of: ["handoff.json", "handoff.md"]) else {
+            let error = TossClientError.transferFailed("Missing or invalid receiver acknowledgment")
+            progressHandler?(.failed(error.localizedDescription))
+            throw error
+        }
         progressHandler?(.received)
         return ack
     }
