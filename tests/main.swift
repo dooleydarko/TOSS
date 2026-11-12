@@ -200,7 +200,10 @@ testCase("Path Traversal and File Sanitization") {
 }
 
 testCase("Offline Queue Enqueue and Tracking") {
-    let queue = TossTransferQueue()
+    let suite = "toss.queue.test.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let queue = TossTransferQueue(defaults: defaults, send: { _ in "test-receipt" })
     let handoff = TossHandoff(
         title: "Queued Offline Handoff",
         destination: .gpt,
@@ -212,6 +215,42 @@ testCase("Offline Queue Enqueue and Tracking") {
     let item = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
     assert(item.status == .pending, "Initial status must be pending")
     assert(queue.items.contains(where: { $0.id == item.id }), "Queue must contain enqueued item")
+    let duplicate = queue.enqueue(handoff: handoff, targetDevice: device, pairingSecret: "secret")
+    assert(duplicate.id == item.id && queue.items.count == 1, "Duplicate pending transfers must be coalesced")
+    let restored = TossTransferQueue(defaults: defaults)
+    assert(restored.items.first?.id == item.id, "Pending transfer must survive reload")
+}
+
+testCase("Queue retries and updates the correct transfer after insertion") {
+    let suite = "toss.queue.retry.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let device = TossDevice(id: "queue-test", name: "Test Mac", host: "127.0.0.1", port: 7443)
+    let first = TossHandoff(title: "First", objective: "Retry first", context: "Test", source: TossSource(type: .text))
+    let second = TossHandoff(title: "Second", objective: "Send second", context: "Test", source: TossSource(type: .text))
+    let queue = TossTransferQueue(defaults: defaults, retryBase: 0.02, send: { item in
+        try await Task.sleep(nanoseconds: 80_000_000)
+        if item.handoff.handoffId == first.handoffId && item.attempts == 1 {
+            throw TossClientError.networkError("Injected failure")
+        }
+        return "receipt-" + item.handoff.handoffId
+    })
+    let firstItem = queue.enqueue(handoff: first, targetDevice: device, pairingSecret: "test")
+    let startDeadline = Date().addingTimeInterval(2)
+    while queue.items.first?.attempts == 0 && Date() < startDeadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    assert(queue.items.first?.attempts == 1, "First send must start")
+    let secondItem = queue.enqueue(handoff: second, targetDevice: device, pairingSecret: "test")
+    let deadline = Date().addingTimeInterval(5)
+    while queue.items.contains(where: { !$0.status.isTerminal }) && Date() < deadline {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    assert(queue.items.first(where: { $0.id == firstItem.id })?.status == .completed(receiptId: "receipt-" + first.handoffId))
+    assert(queue.items.first(where: { $0.id == firstItem.id })?.attempts == 2)
+    assert(queue.items.first(where: { $0.id == secondItem.id })?.status == .completed(receiptId: "receipt-" + second.handoffId))
+    let restored = TossTransferQueue(defaults: defaults)
+    assert(restored.items == queue.items, "Final receipts must persist")
 }
 
 testCase("Bonjour Discovery Service Lifecycle") {

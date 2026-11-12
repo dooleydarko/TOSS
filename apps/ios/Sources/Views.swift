@@ -603,15 +603,21 @@ public struct QueueView: View {
 
     public init() {}
 
-    public var body: some View {
+    public var body: some View { QueueList(queue: store.queue) }
+}
+
+private struct QueueList: View {
+    @ObservedObject var queue: TossTransferQueue
+
+    var body: some View {
         NavigationView {
             List {
-                if store.queue.items.isEmpty {
-                    Text("No queued transfers. All handoffs delivered!")
+                if queue.items.isEmpty {
+                    Text("No queued transfers.")
                         .foregroundColor(.secondary)
                         .padding(.vertical, 8)
                 } else {
-                    ForEach(store.queue.items) { item in
+                    ForEach(queue.items) { item in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(item.handoff.title)
                                 .font(.headline)
@@ -630,7 +636,7 @@ public struct QueueView: View {
             .navigationTitle("Offline Queue")
             .toolbar {
                 Button("Retry All") {
-                    store.queue.retryFailedItems()
+                    queue.retryFailedItems()
                 }
             }
         }

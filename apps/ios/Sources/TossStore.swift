@@ -65,6 +65,7 @@ public final class TossStore: ObservableObject {
             )
         }
         setupDiscovery()
+        queue.triggerQueueProcessing()
     }
 
     public func startDiscovery() {
